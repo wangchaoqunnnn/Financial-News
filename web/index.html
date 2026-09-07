@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>财讯雷达 · A股财经资讯聚合平台（原型演示）</title>
+<meta name="description" content="财经资讯聚合平台原型：实时快讯/官方公告/社交媒体传闻聚合、去重、分类、关联个股、热度与重要消息甄别、企业微信推送（演示数据）">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- 演示模式横幅（对应需求 COM-4/COM-5） -->
+<div class="demo-banner" id="demoBanner">
+  <span>🔬 <b>原型演示模式</b>：本页面全部资讯、行情、推送均为<b>模拟数据</b>，非真实市场信息，不构成任何投资建议；社交媒体传闻未经证实，仅作辅助参考。</span>
+  <button class="link-like" id="btnAbout" title="查看需求对照与说明">需求对照与说明 →</button>
+  <button class="banner-close" id="bannerClose" title="收起">×</button>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⚡</span>
+    <div>
+      <div class="brand-name">财讯雷达 <em class="demo-tag">DEMO</em></div>
+      <div class="brand-sub">A股财经资讯聚合 · 快讯/公告/传闻 · 重要消息企微推送</div>
+    </div>
+  </div>
+
+  <div class="search-wrap">
+    <input id="searchInput" type="search" placeholder="搜索资讯 / 股票代码 / 公司名称（示例）…" autocomplete="off">
+    <div id="searchResults" class="search-results hidden"></div>
+  </div>
+
+  <div class="top-meta">
+    <span class="clock" id="clockTime">--:--:--</span>
+    <span class="market-state" id="marketState">—</span>
+    <span class="quote-note" title="需求 NFR-12 / DR-12：延时行情 15–30s 刷新，非 Level-2 实时">行情延时 30s</span>
+    <button class="btn btn-outline btn-sm" id="btnOpenPush">💬 企微推送 <span class="badge hidden" id="pushBadge">0</span></button>
+  </div>
+</header>
+
+<!-- 主导航：类型（FR-02） -->
+<nav class="tabs" id="typeTabs" aria-label="资讯类型">
+  <button class="tab active" data-type="全部">全部</button>
+  <button class="tab" data-type="快讯"><i class="dot dot-blue"></i>快讯</button>
+  <button class="tab" data-type="深度"><i class="dot dot-purple"></i>深度</button>
+  <button class="tab" data-type="公告"><i class="dot dot-green"></i>公告</button>
+  <button class="tab" data-type="传闻"><i class="dot dot-amber"></i>传闻<em class="warn-tag">未经证实</em></button>
+</nav>
+
+<!-- 子筛选栏：市场 / 行业 / 只看重要 -->
+<div class="filterbar">
+  <div class="chip-group" id="marketChips" aria-label="市场维度">
+    <button class="chip active" data-market="全部">全部市场</button>
+    <button class="chip" data-market="A股">🇨🇳 A股</button>
+    <button class="chip" data-market="宏观">🏛 宏观</button>
+    <button class="chip" data-market="海外">🌍 海外</button>
+  </div>
+  <div class="filter-right">
+    <select id="industrySel" title="行业维度（示例，对应 DP-2 申万行业）" aria-label="行业筛选">
+      <option value="全部">全部行业</option>
+    </select>
+    <label class="check">
+      <input type="checkbox" id="onlyImportant">
+      <span>⭐ 只看重要消息</span>
+    </label>
+    <button class="btn btn-ghost btn-sm" id="btnClearFilters" title="清除全部筛选">清除筛选</button>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- 主信息流 -->
+  <main class="col-main">
+    <div class="feed-head">
+      <span id="feedTitle">实时信息流（时间倒序）</span>
+      <span class="retention-chip" title="需求 R-1：服务器仅保留近 7 日财经数据">数据保留：近 7 日</span>
+    </div>
+    <div id="feed" class="feed"></div>
+    <div id="feedEmpty" class="empty hidden">没有符合条件的资讯，换个筛选试试。</div>
+  </main>
+
+  <!-- 右栏 -->
+  <aside class="col-side">
+    <!-- 重要消息（DP-4 / FR-06） -->
+    <section class="panel" id="importantPanel">
+      <h3>⭐ 重要消息 <span class="hint">热度快速上升 / 硬规则</span></h3>
+      <ul id="importantList" class="mini-list"></ul>
+    </section>
+
+    <!-- 热点榜（DP-4 / FR-07） -->
+    <section class="panel" id="hotPanel">
+      <h3>🔥 热点榜</h3>
+      <div class="seg" id="hotTabs">
+        <button class="seg-btn active" data-hot="realtime">实时</button>
+        <button class="seg-btn" data-hot="today">当日</button>
+        <button class="seg-btn" data-hot="week">近7日</button>
+      </div>
+      <ol id="hotList" class="hot-list"></ol>
+    </section>
+
+    <!-- 自选股（FR-05） + 延时行情（FR-17/DR-12） -->
+    <section class="panel" id="watchPanel">
+      <h3>📌 自选股 · 订阅推送 <span class="hint">行情延时刷新</span></h3>
+      <div class="watch-add">
+        <input id="watchAddInput" placeholder="输入代码/名称添加（示例标的）">
+        <button class="btn btn-primary btn-sm" id="watchAddBtn">+ 添加</button>
+      </div>
+      <ul id="watchList" class="watch-list"></ul>
+      <div class="watch-tip">订阅后，该股关联的「重要消息」将模拟推送到企业微信（FR-09）。</div>
+    </section>
+  </aside>
+</div>
+
+<footer class="footer">
+  <div class="foot-inner">
+    <span>© 财讯雷达 · 原型（v1.1 需求落地）</span>
+    <button class="link-like" id="btnAbout2">需求对照 / 数据保留 / 免责声明</button>
+    <span class="retention-chip">正文在线保留 7 天 · 定时清理</span>
+    <span class="foot-muted">数据源（演示标识）：财联社 · 华尔街见闻 · 东方财富 · 同花顺 · 巨潮资讯 · 上交所/深交所 · Finnhub · 雪球热帖 · 微博</span>
+  </div>
+</footer>
+
+<!-- 企微推送抽屉（FR-09） -->
+<div class="drawer-mask hidden" id="pushMask"></div>
+<aside class="drawer" id="pushDrawer" aria-label="企业微信推送模拟">
+  <div class="drawer-head">
+    <h3>💬 企业微信推送（模拟）</h3>
+    <button class="drawer-close" id="pushClose">×</button>
+  </div>
+  <p class="drawer-sub">对应 FR-09：重要消息自动推送；去重后同一事件仅推 1 条；同一标的 5 分钟内不重复推；含频控与免打扰策略。</p>
+  <ul id="pushList" class="push-list"></ul>
+  <div class="drawer-actions">
+    <button class="btn btn-ghost btn-sm" id="btnTriggerPush">▶ 模拟触发一条重要消息推送</button>
+    <button class="btn btn-outline btn-sm" id="btnMarkRead">全部标记已读</button>
+  </div>
+</aside>
+
+<!-- 悬浮推送按钮（移动端） -->
+<button class="fab" id="pushFab" title="企业微信推送">💬<span class="badge hidden" id="pushBadgeFab">0</span></button>
+
+<!-- 通用模态：资讯详情 / 个股主页 / 关于 -->
+<div class="modal-mask hidden" id="modalMask"></div>
+<div class="modal" id="modalBox" role="dialog" aria-modal="true"></div>
+
+<!-- Toast -->
+<div id="toasts" class="toasts"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
