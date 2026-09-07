@@ -235,3 +235,10 @@ select{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:
 .news-arrive{outline:2px solid #bfdbfe}
 .social-note{background:#fff8e6;border:1px dashed #eab308;color:#854d0e;border-radius:8px;padding:10px 12px;font-size:12.5px;margin:8px 0}
 
+/* ---------- v1.3 设置页 ---------- */
+.set-group{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;background:#fbfcfe}
+.set-group textarea{width:100%;min-height:52px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box;margin-top:6px}
+.set-input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-size:12.5px;font-family:inherit;box-sizing:border-box;margin-top:6px}
+.set-result{margin-top:6px}
+
+

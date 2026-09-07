@@ -34,6 +34,7 @@
     <span class="clock" id="clockTime">--:--:--</span>
     <span class="market-state" id="marketState">—</span>
     <span class="quote-note" title="需求 NFR-12 / DR-12：延时行情 15–30s 刷新，非 Level-2 实时">行情延时 30s</span>
+    <button class="btn btn-outline btn-sm" id="btnSettings" title="配置雪球/微博 Cookie 与企业微信推送机器人">⚙ 设置</button>
     <button class="btn btn-outline btn-sm" id="btnOpenPush">💬 企微推送 <span class="badge hidden" id="pushBadge">0</span></button>
   </div>
 </header>
@@ -129,7 +130,7 @@
   <p class="drawer-sub">真实「重要消息」自动进入推送队列：同事件合并仅推 1 条、同一标的 5 分钟内不重复；服务端配置 WECOM_WEBHOOK（企微群机器人）后真实发送，未配置则为本地模拟。</p>
   <ul id="pushList" class="push-list"></ul>
   <div class="drawer-actions">
-    <button class="btn btn-ghost btn-sm" id="btnTriggerPush">▶ 模拟触发一条重要消息推送</button>
+    <button class="btn btn-ghost btn-sm" id="btnTriggerPush">📨 发送测试消息到企微</button>
     <button class="btn btn-outline btn-sm" id="btnMarkRead">全部标记已读</button>
   </div>
 </aside>

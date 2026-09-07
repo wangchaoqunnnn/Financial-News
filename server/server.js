@@ -40,20 +40,36 @@ function marketOf(code) {
 }
 function secidOf(code) { const m = marketOf(code); return (m === 'sh' ? 1 : 0) + '.' + code; }
 
-/* ---------------- 社交源授权（Cookie，默认关闭，配置后自动启用） ----------------
- * 读取优先级：环境变量 XUEQIU_COOKIE / WEIBO_COOKIE > server/cookies.json（已 gitignore）
- * 获取方式见 README「社交源（雪球/微博）授权」一节。Cookie 等同账号凭证，切勿提交/外传。
+/* ---------------- 社交源与推送配置（设置页 / 环境变量 / server/cookies.json） ----------------
+ * 三者读取优先级（引导时）：环境变量 XUEQIU_COOKIE / WEIBO_COOKIE / WECOM_WEBHOOK > server/cookies.json
+ * 页面「设置」提交后即时更新内存并持久化到 server/cookies.json（已 gitignore），无需重启。
+ * Cookie/Webhook 等同账号凭证，切勿提交或外传。
  */
 const COOKIE_FILE = path.join(__dirname, 'cookies.json');
 function loadCookieFile() { try { if (fs.existsSync(COOKIE_FILE)) return JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf8')); } catch (e) { console.warn('[cookies.json] 解析失败:', e.message); } return {}; }
 const CFG_COOKIES = loadCookieFile();
-const XQ_COOKIE = process.env.XUEQIU_COOKIE || CFG_COOKIES.xueqiu || '';
-const WB_COOKIE = process.env.WEIBO_COOKIE || CFG_COOKIES.weibo || '';
+let XQ_COOKIE = process.env.XUEQIU_COOKIE || CFG_COOKIES.xueqiu || '';
+let WB_COOKIE = process.env.WEIBO_COOKIE || CFG_COOKIES.weibo || '';
+let wecomWebhook = process.env.WECOM_WEBHOOK || CFG_COOKIES.wecom || '';
 const SOCIAL = {
-  xueqiu: { configured: !!XQ_COOKIE, ok: false, last: 0, err: XQ_COOKIE ? null : '未配置 XUEQIU_COOKIE' },
-  weibo:  { configured: !!WB_COOKIE, ok: false, last: 0, err: WB_COOKIE ? null : '未配置 WEIBO_COOKIE' }
+  xueqiu: { configured: !!XQ_COOKIE, ok: false, last: 0, err: XQ_COOKIE ? null : '未配置 Cookie' },
+  weibo:  { configured: !!WB_COOKIE, ok: false, last: 0, err: WB_COOKIE ? null : '未配置 Cookie' }
 };
-const SOCIAL_GUIDE = '如何启用：浏览器登录雪球/微博后，F12→Application→Cookies 复制完整 Cookie 字符串，设为环境变量 XUEQIU_COOKIE / WEIBO_COOKIE，或写入 server/cookies.json（{"xueqiu":"…","weibo":"…"}）后重启服务。';
+const SOCIAL_GUIDE = '在页面「⚙ 设置」中粘贴从浏览器登录后复制的完整 Cookie 字符串即可（无需重启）；也可设环境变量 XUEQIU_COOKIE / WEIBO_COOKIE 或写入 server/cookies.json。';
+function persistCookies() {
+  try {
+    const obj = Object.assign(loadCookieFile(), { xueqiu: XQ_COOKIE, weibo: WB_COOKIE, wecom: wecomWebhook });
+    fs.writeFileSync(COOKIE_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (e) { console.warn('[cookies.json] 写入失败:', e.message); }
+}
+function applySettings(body) {
+  const changed = {};
+  if (body && Object.prototype.hasOwnProperty.call(body, 'xueqiu')) { XQ_COOKIE = body.xueqiu ? String(body.xueqiu) : ''; SOCIAL.xueqiu.configured = !!XQ_COOKIE; SOCIAL.xueqiu.last = 0; SOCIAL.xueqiu.ok = false; SOCIAL.xueqiu.err = XQ_COOKIE ? null : '未配置 Cookie'; changed.xueqiu = 1; }
+  if (body && Object.prototype.hasOwnProperty.call(body, 'weibo')) { WB_COOKIE = body.weibo ? String(body.weibo) : ''; SOCIAL.weibo.configured = !!WB_COOKIE; SOCIAL.weibo.last = 0; SOCIAL.weibo.ok = false; SOCIAL.weibo.err = WB_COOKIE ? null : '未配置 Cookie'; changed.weibo = 1; }
+  if (body && Object.prototype.hasOwnProperty.call(body, 'wecom')) { wecomWebhook = body.wecom ? String(body.wecom) : ''; changed.wecom = 1; }
+  if (Object.keys(changed).length) persistCookies();
+  return changed;
+}
 
 /* ---------------- 证券代码→公司词典（东方财富沪深A股全列表） ---------------- */
 const universe = new Map();   // code -> {code,name,ind}
@@ -200,6 +216,7 @@ function addItems(list) {
     item.codes = [...item.codes].map(c => { const u = universe.get(c); return { code: c, name: u ? u.name : c, ind: u ? u.ind : '' }; });
     store.set(key, item);
     added++;
+    if (!PUSH.suppressInitial && isAutoPushWorthy(item) && PUSH.queue.length < 20) PUSH.queue.push(item);
   }
   // 保留策略：7 天 / 上限
   const cutoff = Date.now() - RETENTION_MS;
@@ -408,14 +425,56 @@ async function getKline(code, days) {
   return { code, bars: [] };
 }
 
-/* ---------------- 企微推送（可选，需 WECOM_WEBHOOK） ---------------- */
-const WECOM_WEBHOOK = process.env.WECOM_WEBHOOK || '';
+/* ---------------- 企微推送引擎（设置页配置 Webhook 后自动运行） ---------------- */
 async function sendWecom(text) {
-  if (!WECOM_WEBHOOK) return { sent: false, reason: '未配置企微机器人 Webhook（环境变量 WECOM_WEBHOOK）' };
-  const r = await fet(WECOM_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msgtype: 'text', text: { content: text } }) });
-  const j = await r.json();
-  return { sent: j.errcode === 0, reason: j.errmsg || '', errcode: j.errcode };
+  if (!wecomWebhook) return { sent: false, reason: '未配置企微机器人 Webhook（请在页面「⚙ 设置」中填写）' };
+  try {
+    const r = await fet(wecomWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msgtype: 'text', text: { content: text } }) });
+    const j = await r.json();
+    return { sent: j.errcode === 0, reason: j.errmsg || '', errcode: j.errcode };
+  } catch (e) {
+    console.warn('[wecom] 发送异常:', e.message);
+    return { sent: false, reason: '请求企微失败：' + e.message };
+  }
 }
+/* 自动推送：新重要消息 → 企微群机器人（含事件去重 / 频控 / 推送日志） */
+const PUSH = {
+  log: [],             // 推送日志（内存，最多 100 条）
+  queue: [],           // 待发送队列
+  sentKeys: new Set(), // 同事件去重
+  lastSent: 0,         // 频控：距上次发送
+  enabled: false,
+  suppressInitial: true
+};
+const PUSH_MIN_GAP = 20000;                       // 两次自动推送最小间隔 20s
+const PUSH_CRITICAL_ANN = /业绩预告|业绩快报|停牌|复牌|澄清|立案|处罚|重组|并购|回购|要约/;
+function pushLogAdd(entry) { PUSH.log.unshift(entry); if (PUSH.log.length > 100) PUSH.log.length = 100; }
+function isAutoPushWorthy(it) {
+  if (!it || !it.imp || it.type === '传闻' || it.rumor) return false;
+  if (it.type === '公告' && !(it.annType && PUSH_CRITICAL_ANN.test(it.annType))) return false;
+  return true;
+}
+function wecomText(it) {
+  const codes = (it.codes || []).map(c => `${c.name}(${c.code})`).join('、');
+  return `【重要消息·财讯雷达】${it.title}\n类型：${it.type}${it.annType ? '·' + it.annType : ''}｜来源：${it.source}\n时间：${new Date(it.ts || it.time || Date.now()).toLocaleString('zh-CN')}${codes ? '\n关联：' + codes : ''}${it.link ? '\n原文：' + it.link : ''}\n（自动推送｜仅供参考，不构成投资建议）`;
+}
+async function drainPushQueue() {
+  while (PUSH.queue.length) {
+    if (!wecomWebhook) { PUSH.enabled = false; return; }
+    const gap = Date.now() - PUSH.lastSent;
+    if (gap < PUSH_MIN_GAP) return;
+    const it = PUSH.queue.shift();
+    const key = hashKey(it.title) + ':' + Math.floor((it.ts || Date.now()) / 3600e3);
+    if (PUSH.sentKeys.has(key)) continue;              // 同事件只推一次
+    PUSH.sentKeys.add(key);
+    if (PUSH.sentKeys.size > 300) PUSH.sentKeys.clear();
+    const r = await sendWecom(wecomText(it));
+    PUSH.lastSent = Date.now();
+    pushLogAdd({ id: uid2(), ts: Date.now(), title: it.title, type: it.type, newsId: it.id, target: '企微群机器人', status: r.sent ? '已发送' : '发送失败', note: r.sent ? '' : (r.reason || '') });
+    if (!r.sent) PUSH.queue.unshift(it);               // 失败放回队尾稍后重试一次
+  }
+}
+function uid2() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 /* ---------------- 源适配器：雪球热帖 / 微博热搜（需 Cookie） ---------------- */
 function parseSocialTime(v) {
@@ -499,7 +558,8 @@ async function pollNews(initial) {
   try { results.push(['xueqiu', await pollXueqiu()]); } catch (e) { SOCIAL.xueqiu.err = e.message; }
   try { results.push(['weibo', await pollWeibo()]); } catch (e) { SOCIAL.weibo.err = e.message; }
   const added = results.reduce((s, x) => s + x[1], 0);
-  console.log(`[poll] ${initial ? 'initial' : 'tick'} +${added} items, total=${store.size}, ${Date.now() - t0}ms`);
+  drainPushQueue().catch(e => console.error('[push] err', e.message));
+  console.log(`[poll] ${initial ? 'initial' : 'tick'} +${added} items, total=${store.size}, pushQ=${PUSH.queue.length}, ${Date.now() - t0}ms`);
 }
 
 /* ---------------- 静态资源 ---------------- */
@@ -558,7 +618,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/')) {
       if (p === '/api/meta') {
         json(res, {
-          mode: 'live', version: '1.2', time: Date.now(), retentionDays: 7, count: store.size,
+          mode: 'live', version: '1.3', time: Date.now(), retentionDays: 7, count: store.size,
           universe: universe.size, sources: srcState, universeReady,
           social: {
             configured: SOCIAL.xueqiu.configured || SOCIAL.weibo.configured,
@@ -566,7 +626,8 @@ const server = http.createServer(async (req, res) => {
             ok: SOCIAL.xueqiu.ok || SOCIAL.weibo.ok,
             guide: SOCIAL_GUIDE
           },
-          wecom: { configured: !!WECOM_WEBHOOK }
+          wecom: { configured: !!wecomWebhook },
+          push: { enabled: !!wecomWebhook, auto: PUSH.queue.length, log: PUSH.log.length }
         });
         return;
       }
@@ -632,6 +693,43 @@ const server = http.createServer(async (req, res) => {
         catch (e) { json(res, { sent: false, reason: 'bad request' }, 400); }
         return;
       }
+      if (p === '/api/push-test') {
+        const r = await sendWecom('【财讯雷达·测试】推送已连通 ✓ ' + new Date().toLocaleString('zh-CN') + '（自动推送引擎就绪，重要消息将自动推送到本群）');
+        pushLogAdd({ id: uid2(), ts: Date.now(), title: '测试推送', type: 'test', newsId: null, target: '企微群机器人', status: r.sent ? '已发送' : '发送失败', note: r.sent ? '' : (r.reason || '') });
+        json(res, r);
+        return;
+      }
+      if (p === '/api/push-log') {
+        json(res, { items: PUSH.log.slice(0, 50), enabled: !!wecomWebhook });
+        return;
+      }
+      if (p === '/api/settings') {
+        if (req.method === 'GET') {
+          json(res, {
+            xueqiu: { configured: SOCIAL.xueqiu.configured, ok: SOCIAL.xueqiu.ok, err: SOCIAL.xueqiu.err, mask: XQ_COOKIE ? XQ_COOKIE.slice(0, 6) + '…(已配置，长度 ' + XQ_COOKIE.length + ')' : '' },
+            weibo: { configured: SOCIAL.weibo.configured, ok: SOCIAL.weibo.ok, err: SOCIAL.weibo.err, mask: WB_COOKIE ? WB_COOKIE.slice(0, 6) + '…(已配置，长度 ' + WB_COOKIE.length + ')' : '' },
+            wecom: { configured: !!wecomWebhook, mask: wecomWebhook ? wecomWebhook.slice(0, 30) + '…' : '' },
+            socialGuide: SOCIAL_GUIDE
+          });
+          return;
+        }
+        if (req.method === 'POST') {
+          let raw = '';
+          for await (const c of req) raw += c;
+          try {
+            const body = JSON.parse(raw || '{}');
+            const changed = applySettings(body);
+            json(res, { ok: true, changed, xueqiu: SOCIAL.xueqiu.configured, weibo: SOCIAL.weibo.configured, wecom: !!wecomWebhook });
+            // 立即启用：清除节流并立刻抓取社交源 + 触发一轮轮询
+            setImmediate(async () => {
+              try { if (XQ_COOKIE) await pollXueqiu(); if (WB_COOKIE) await pollWeibo(); await pollNews(false); } catch (e) { console.error('[settings kick]', e.message); }
+            });
+            return;
+          } catch (e) { json(res, { ok: false, error: e.message }, 400); return; }
+        }
+        json(res, { error: 'method not allowed' }, 405);
+        return;
+      }
       json(res, { error: 'not found' }, 404);
       return;
     }
@@ -646,6 +744,7 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log(`[server] 财讯雷达后端 http://127.0.0.1:${PORT} （数据保留 ${RETENTION_MS / 86400e3} 天）`);
   await pollNews(true);
   await pollAnnounce().catch(e => console.error('[ann] err', e.message));
+  PUSH.suppressInitial = false;                            // 首次装载完成后自动推送引擎生效
   setInterval(() => pollNews(false).catch(e => console.error('[poll] err', e.message)), 20000);
   setInterval(() => pollAnnounce().catch(e => console.error('[ann] err', e.message)), 120000);
 });

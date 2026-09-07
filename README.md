@@ -48,9 +48,14 @@ PORT=8899 node server/server.js
 3. 逐条 Cookie 双击 **Value** 全选复制并拼接，或更简单：切到 **Network** 面板 → 刷新页面 → 点任意 xueqiu.com/m.weibo.cn 请求 → **Request Headers** 中找到 `Cookie:` 一整行，把整行值复制下来；
 4. 关键 Cookie 参考：雪球 `xq_a_token`（及 `u`、`xqat`）；微博 `SUB`、`SUBP`（m.weibo.cn 另需 `WBPSESS`）。直接整串复制最稳妥。
 
-**第 2 步：把 Cookie 交给服务端（二选一）**
+**第 2 步：提交到设置页（推荐，立即生效、无需重启）**
 
-方式 A：环境变量（PowerShell）
+1. 打开页面 **http://127.0.0.1:8899/** → 右上角 **「⚙ 设置」**；
+2. 分别粘贴：雪球 Cookie / 微博 Cookie / 企业微信推送机器人 URL；
+3. 点 **「保存并立即启用」** → 服务端立刻开始抓取社交源；可点 **「📨 发送测试推送」** 验证企微连通；
+4. 「💬 企微推送」抽屉实时展示服务端自动推送记录（重要消息自动推送：同事件去重 + 20s 频控）。
+
+以下为等效的 CLI / 配置文件方式（不想用页面设置时可选）：环境变量方式（PowerShell）：
 
 ```powershell
 $env:XUEQIU_COOKIE="xq_a_token=xxxx; u=xxxx; xqat=xxxx"
@@ -58,14 +63,14 @@ $env:WEIBO_COOKIE="SUB=xxxx; SUBP=xxxx"
 node server/server.js
 ```
 
-方式 B：配置文件（更便于管理，已被 .gitignore 排除、不会提交）
+或直接编辑配置文件（效果相同，已被 .gitignore 排除、不会提交）：
 
 ```json
 // server/cookies.json
 { "xueqiu": "xq_a_token=…; u=…; …", "weibo": "SUB=…; SUBP=…; …" }
 ```
 
-保存后**重启** `node server/server.js`。页面右上角"数据来源与说明"会显示"雪球：已启用 ✓ / 微博：已启用 ✓"及最近的请求错误。
+保存后**重启** `node server/server.js`（若用设置页提交则无需重启）。页面「⚙ 设置」与「数据来源与说明」会显示"雪球/微博：已启用 ✓"及最近的请求错误。
 
 **注意**
 - Cookie 等同账号凭证，**切勿提交到 Git/公开分享**（本项目已忽略 `server/cookies.json`）；
