@@ -456,7 +456,24 @@ function newsUrl(id) { return SITE_URL + '#n=' + encodeURIComponent(id); }
 function isAutoPushWorthy(it) {
   if (!it || !it.imp || it.type === '传闻' || it.rumor) return false;
   if (it.type === '公告' && !(it.annType && PUSH_CRITICAL_ANN.test(it.annType))) return false;
+  if (!pushRelevant(it)) return false;      // 仅推送与 A股 / 美股 市场相关的消息
   return true;
+}
+/* 推送相关性过滤：A股市场 / 美股市场（美股含美联储/美债等直接驱动因素）；
+ * 纯其他市场/资产（欧股、日经、恒指港股、印度、比特币等）不推送。 */
+function pushRelevant(it) {
+  if (it.type === '公告') return true;      // 巨潮公告均为 A股上市公司公告
+  const t = (it.title || '') + ' ' + (it.summary || '') + ' ' + (it.codes || []).map(c => (c.name || '') + ' ' + (c.code || '')).join(' ');
+  const hasUS = /美股|纳指|道指|标普|中概股|美债|美联储|纽交所|纳斯达克|费城半导体|英伟达|苹果公司|特斯拉|微软|亚马逊|谷歌|Meta|甲骨文|AMD|英特尔/.test(t);
+  if (hasUS) return true;
+  const hasOtherMkt = /欧股|日经|恒生指数|恒指|港股|H股|印度|泰国|越南|巴西|土耳其|英股|德股|法股|比特币|加密货币|以太坊/.test(t);
+  // A股强信号（指数/市场/板块/公司）
+  const hasACnStrong = /A股|沪深|沪指|深成指|创业板|北交所|两市|证监会|交易所|板块|涨停|跌停|上市公司/.test(t) || it.market === 'A股' || (it.codes && it.codes.length > 0);
+  // 国内政策信号（排除"印度/日本/欧/韩等外国央行"的误命中）
+  const hasCNPolicy = /央行|降准|降息|LPR|MLF|逆回购|国常会|印花税/.test(t) && !/(印度|日本|欧|欧洲|韩国|澳洲|新西兰|巴西|俄罗斯|土耳其|墨西哥|南非)央行/.test(t);
+  const hasACn = hasACnStrong || hasCNPolicy;
+  if (hasOtherMkt && !hasACn) return false;
+  return hasACn;
 }
 function wecomText(it) {
   const codes = (it.codes || []).map(c => `${c.name}(${c.code})`).join('、');
