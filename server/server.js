@@ -415,17 +415,42 @@ async function pollNews(initial) {
 /* ---------------- 静态资源 ---------------- */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.md': 'text/plain; charset=utf-8', '.pdf': 'application/pdf' };
 function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  const rel0 = decodeURIComponent(pathname);
+  if (rel0 === '/favicon.ico') { res.writeHead(204); res.end(); return; }   // 浏览器图标请求，静默
+  let rel = rel0;
   if (rel === '/' || rel === '') rel = '/index.html';
-  if (rel === '/web/' ) rel = '/web/index.html';
+  if (rel.endsWith('/')) rel += 'index.html';
+  if (rel === '/web') rel = '/web/index.html';                              // 目录无尾斜杠：直接补 index
   const file = path.normalize(path.join(ROOT, rel));
   if (!file.startsWith(ROOT)) { res.writeHead(403); res.end('forbidden'); return; }
   fs.stat(file, (err, st) => {
-    if (err || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('404 File not found.'); return; }
+    if (err || !st.isFile()) {
+      // 目录缺尾斜杠 → 301 补斜杠（如 /web → /web/）
+      const probe = path.normalize(path.join(ROOT, rel0));
+      if (!rel0.endsWith('/') && !path.extname(rel0)) {
+        return fs.stat(probe, (e2, s2) => {
+          if (!e2 && s2 && s2.isDirectory()) { res.writeHead(301, { Location: rel0 + '/' }); res.end(); return; }
+          notFound(req, res, rel0);
+        });
+      }
+      return notFound(req, res, rel0);
+    }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     fs.createReadStream(file).pipe(res);
   });
 }
+function notFound(req, res, pathname) {
+  console.warn(`[404] ${req.method} ${req.url}`);
+  // 无扩展名的未知路径（如手输 /abc、/index）→ 跳转到应用首页，避免裸 404
+  if (!path.extname(pathname)) {
+    res.writeHead(302, { Location: '/web/index.html' });
+    res.end();
+    return;
+  }
+  res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end('<!doctype html><meta charset="utf-8"><title>404</title><body style="font-family:sans-serif;background:#f2f4f8;padding:40px;text-align:center"><h2>404 · 页面不存在</h2><p>资源未找到：<code>' + escapeHtml(pathname) + '</code></p><p><a href="/web/index.html">← 返回财讯雷达首页</a></p></body>');
+}
+function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 /* ---------------- HTTP API ---------------- */
 const json = (res, obj, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(obj)); };
