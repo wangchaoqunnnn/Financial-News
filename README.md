@@ -90,7 +90,7 @@ node server/server.js
 ```
 ├── 项目需求.md          # 需求规格说明书 v1.1
 ├── README.md
-├── index.html           # 入口（自动跳转 /web/index.html）
+├── index.html           # 入口（JS 相对跳转到 web/index.html，兼容子路径部署并保留 #n= 深链）
 ├── server/              # Node 后端（零依赖）
 │   ├── server.js        # 静态服务 + 数据源适配 + 去重/分类/关联 + 行情/K线代理 + API
 │   └── package.json
@@ -109,20 +109,46 @@ node server/server.js
 
 企微推送消息自带**可点击的详情链接**（点击 → 在站点打开对应资讯详情页）。链接格式：`https://wangchaoqun.top/news#n=<消息id>`，页面会自动直达该条资讯。
 
-**1. 前端静态托管在 /news**
+> ⚠️ 子路径部署的经典坑：入口页 `index.html` 的跳转**必须用相对路径**。本仓库入口已改为 JS 相对跳转（`web/index.html` + 携带 `#n=`/`?` 参数），因此 `/news/` 下会正确解析为 `/news/web/index.html`，不会再跳到域名根 `/web/index.html` 造成 404。
 
-把 `web/` 目录内容上传到站点 `/news` 路径（`/news/index.html`、`/news/app.js` …），或 nginx：
+**方案 A（推荐）：把应用目录直接挂到 /news，无跳转页**
+
+把 `web/` 目录整体放到服务器 `/path/to/financial-news-web/`（内容：`index.html / styles.css / app.js / data.js`）：
 
 ```nginx
-location /news {
-    try_files $uri $uri/ /news/index.html;   # 前端（web 目录内容）
+location = /news { return 301 /news/; }          # 目录补尾斜杠
+location /news/ {
+    alias /path/to/financial-news-web/;          # 直接指向 web 目录
+    index index.html;
 }
-location /api {                               # 后端代理（必须）
+location /api {                                   # 后端代理（必须）
     proxy_pass http://127.0.0.1:8899;
     proxy_set_header Host $host;
     proxy_read_timeout 30s;
 }
 ```
+
+**方案 B：托管仓库根目录（入口页自动相对跳转）**
+
+把整个仓库放到 `/path/to/Financial-News/`（含 `index.html` 与 `web/`）：
+
+```nginx
+location = /news { return 301 /news/; }
+location /news/ {
+    alias /path/to/Financial-News/;              # 仓库根：先出 index.html，再相对跳转 web/index.html
+    index index.html;
+}
+location /api {
+    proxy_pass http://127.0.0.1:8899;
+    proxy_set_header Host $host;
+    proxy_read_timeout 30s;
+}
+```
+
+两种方式下：
+- 前端所有资源用**相对路径**引用，`/news/` 下自动按子路径解析；
+- 前端 API 用同源绝对路径 `/api/*`，由上面的 `/api` 反代转发到本机 8899（无跨域）；
+- 深链 `https://wangchaoqun.top/news#n=<id>`：方案 A 直达应用并自动打开详情；方案 B 经入口页相对跳转，`#n=` 参数会被保留并同样直达详情。
 
 **2. 后端与推送链接域名**
 

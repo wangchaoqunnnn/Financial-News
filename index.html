@@ -2,13 +2,24 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0;url=/web/index.html">
-<title>财讯雷达 · A股财经资讯聚合平台（原型演示）</title>
+<title>财讯雷达 · A股财经资讯聚合平台</title>
 </head>
 <body style="font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#f2f4f8;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
-<p style="background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08);color:#1c2430">
-正在打开原型… 若未自动跳转，请点击
-<a href="/web/index.html" style="color:#2563eb">进入 财讯雷达 原型首页</a>
-</p>
+<div style="background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08);color:#1c2430;text-align:center">
+  <p style="margin:0 0 12px">正在进入 <b>财讯雷达</b>…</p>
+  <p style="margin:0"><a id="go" href="web/index.html" style="color:#2563eb">如果未自动跳转，请点击这里进入</a></p>
+</div>
+<noscript><p style="text-align:center"><a href="web/index.html">进入财讯雷达（需启用 JavaScript 以保留跳转参数）</a></p></noscript>
+<script>
+/* 相对路径跳转：兼容"域名根目录"与"任意子路径（如 /news/）"两种部署。
+   meta refresh 绝对路径（/web/index.html）在子路径部署会 404，故改用 JS 相对跳转，
+   并自动携带当前 ?query 与 #n= 深链参数（企微推送点击后直达对应资讯）。 */
+(function () {
+  var target = 'web/index.html' + location.search + location.hash;
+  var a = document.getElementById('go');
+  if (a) a.href = target;
+  location.replace(target);   // 相对路径：/news/ 下解析为 /news/web/index.html，根目录下解析为 /web/index.html
+})();
+</script>
 </body>
 </html>
