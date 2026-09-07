@@ -226,6 +226,7 @@
     var it = itemMap.get(id);
     if (!it) { var d = items.find(function (x) { return x.id === id; }); if (d) it = d; }
     if (!it) return;
+    try { if (targetIdFromUrl() !== it.id) history.replaceState(null, '', '#n=' + encodeURIComponent(it.id)); } catch (e) { /* 忽略 */ }
     var link = it.link && it.link !== '#' ? '<p style="font-size:12px;margin-top:8px">🔗 原文链接：<a class="source-link" href="' + esc(it.link) + '" target="_blank" rel="noopener noreferrer">' + esc(it.link) + '</a></p>' : '';
     var rumor = it.rumor ? '<div class="disclaimer-box">⚠️ <b>未经证实</b>：本条由 ' + esc(it.source) + ' 报道/转载，未经上市公司官方披露，请以公司公告与交易所信息为准；仅作辅助参考，不作为投资依据。（COM-4/FR-08）</div>' : '';
     var mergedNote = (it.merged > 1) ? '<div class="related-box"><b>多源去重（DP-1）</b>：本事件共 ' + it.merged + ' 家来源报道，已合并为一条主记录。</div>' : '';
@@ -792,14 +793,24 @@
   }
 
   /* ---------- 引导 ---------- */
-  /* 深链：#n=消息id（企微推送点开直达详情） */
-  function tryOpenHash(attempt) {
+  /* 深链：#n=消息id / ?n=消息id（企微推送点开直达详情，如 https://wangchaoqun.top/news#n=xxxx） */
+  function targetIdFromUrl() {
+    try { var sp = new URLSearchParams(location.search); var q = sp.get('n'); if (q) return q; } catch (e) { /* */ }
     var h = location.hash || '';
-    if (h.indexOf('#n=') !== 0) return;
-    var id = decodeURIComponent(h.slice(3));
+    if (h.indexOf('#n=') === 0) return decodeURIComponent(h.slice(3));
+    return null;
+  }
+  function tryOpenTarget(attempt) {
+    var id = targetIdFromUrl();
+    if (!id) return;
     if (itemMap.has(id)) { openDetail(id); return; }
-    if ((attempt || 0) < 10) setTimeout(function () { tryOpenHash((attempt || 0) + 1); }, 500);
-    else toast('该消息可能已超出 7 日保留期', 'warn');
+    if ((attempt || 0) < 6) { setTimeout(function () { tryOpenTarget((attempt || 0) + 1); }, 500); return; }
+    if (MODE === 'live') {
+      api('/api/item?id=' + encodeURIComponent(id)).then(function (j) {
+        if (j && j.item) { upsert([j.item]); openDetail(j.item.id); }
+        else toast('该消息已超出 7 日保留期或已被清理', 'warn');
+      }).catch(function () { toast('打开失败：服务不可达', 'warn'); });
+    } else toast('该消息已超出 7 日保留期或已被清理', 'warn');
   }
   async function bootLive() {
     setMode('demo', null);
@@ -812,8 +823,9 @@
       await pollFeed();
       refreshWatchQuotes();
       fetchServerPush();
-      tryOpenHash(0);
-      window.addEventListener('hashchange', function () { tryOpenHash(0); });
+      tryOpenTarget(0);
+      window.addEventListener('hashchange', function () { tryOpenTarget(0); });
+      window.addEventListener('popstate', function () { tryOpenTarget(0); });
       setInterval(function () { pollFeed(); }, 15000);
       setInterval(function () { refreshWatchQuotes(); }, 10000);
       setInterval(function () { fetchServerPush(); }, 20000);

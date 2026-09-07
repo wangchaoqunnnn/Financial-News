@@ -105,6 +105,38 @@ node server/server.js
 `/api/meta` `/api/feed?type=&market=&q=&imp=&max=` `/api/stocks?q=` `/api/stocknews?code=`
 `/api/quote?codes=600519,300750` `/api/minute?code=` `/api/kline?code=&days=` `/api/push-send`
 
+## 部署到 https://wangchaoqun.top/news
+
+企微推送消息自带**可点击的详情链接**（点击 → 在站点打开对应资讯详情页）。链接格式：`https://wangchaoqun.top/news#n=<消息id>`，页面会自动直达该条资讯。
+
+**1. 前端静态托管在 /news**
+
+把 `web/` 目录内容上传到站点 `/news` 路径（`/news/index.html`、`/news/app.js` …），或 nginx：
+
+```nginx
+location /news {
+    try_files $uri $uri/ /news/index.html;   # 前端（web 目录内容）
+}
+location /api {                               # 后端代理（必须）
+    proxy_pass http://127.0.0.1:8899;
+    proxy_set_header Host $host;
+    proxy_read_timeout 30s;
+}
+```
+
+**2. 后端与推送链接域名**
+
+在同一台服务器运行 `node server/server.js`，并设置对外地址：
+
+```bash
+SITE_URL=https://wangchaoqun.top/news node server/server.js
+# 未设置时默认即为 https://wangchaoqun.top/news（本地联调可改为 http://127.0.0.1:8899）
+```
+
+- 前端全部请求走相对路径 `/api/*`，由上面的 `/api` 反代转发到本机 8899（同源，无跨域问题）；
+- 若站点本身没有其它应用、域名整个给本项目，可简化为 `location / { proxy_pass http://127.0.0.1:8899; }`，此时 `SITE_URL=https://wangchaoqun.top`；
+- 在「⚙ 设置」填好企微 Webhook 后，推送消息中的"点击查看详情"链接即指向 `SITE_URL#n=<消息id>`；手机点击会打开浏览器并直达该资讯详情（超过 7 日保留期的消息会提示已清理）。
+
 ## 已知边界
 
 - 社交传闻（雪球/微博）需授权数据源；当前仅收录真实媒体的"传/曝"类标题。

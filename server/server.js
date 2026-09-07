@@ -449,6 +449,10 @@ const PUSH = {
 const PUSH_MIN_GAP = 20000;                       // 两次自动推送最小间隔 20s
 const PUSH_CRITICAL_ANN = /业绩预告|业绩快报|停牌|复牌|澄清|立案|处罚|重组|并购|回购|要约/;
 function pushLogAdd(entry) { PUSH.log.unshift(entry); if (PUSH.log.length > 100) PUSH.log.length = 100; }
+/* 对外站点地址（推送消息里的可点击详情链接；部署后可改环境变量 SITE_URL，如 https://wangchaoqun.top/news） */
+const SITE_URL = (process.env.SITE_URL || 'https://wangchaoqun.top/news').replace(/\/+$/, '');
+function newsUrl(id) { return SITE_URL + '#n=' + encodeURIComponent(id); }
+
 function isAutoPushWorthy(it) {
   if (!it || !it.imp || it.type === '传闻' || it.rumor) return false;
   if (it.type === '公告' && !(it.annType && PUSH_CRITICAL_ANN.test(it.annType))) return false;
@@ -456,7 +460,7 @@ function isAutoPushWorthy(it) {
 }
 function wecomText(it) {
   const codes = (it.codes || []).map(c => `${c.name}(${c.code})`).join('、');
-  return `【重要消息·财讯雷达】${it.title}\n类型：${it.type}${it.annType ? '·' + it.annType : ''}｜来源：${it.source}\n时间：${new Date(it.ts || it.time || Date.now()).toLocaleString('zh-CN')}${codes ? '\n关联：' + codes : ''}${it.link ? '\n原文：' + it.link : ''}\n（自动推送｜仅供参考，不构成投资建议）`;
+  return `【重要消息·财讯雷达】${it.title}\n类型：${it.type}${it.annType ? '·' + it.annType : ''}｜来源：${it.source}\n时间：${new Date(it.ts || it.time || Date.now()).toLocaleString('zh-CN')}${codes ? '\n关联：' + codes : ''}\n点击查看详情：${newsUrl(it.id)}${it.link ? '\n原文：' + it.link : ''}\n（自动推送｜仅供参考，不构成投资建议）`;
 }
 async function drainPushQueue() {
   while (PUSH.queue.length) {
@@ -627,7 +631,8 @@ const server = http.createServer(async (req, res) => {
             guide: SOCIAL_GUIDE
           },
           wecom: { configured: !!wecomWebhook },
-          push: { enabled: !!wecomWebhook, auto: PUSH.queue.length, log: PUSH.log.length }
+          push: { enabled: !!wecomWebhook, auto: PUSH.queue.length, log: PUSH.log.length },
+          siteUrl: SITE_URL
         });
         return;
       }
@@ -671,6 +676,16 @@ const server = http.createServer(async (req, res) => {
         json(res, { items: [] });
         return;
       }
+      if (p === '/api/item') {
+        const id = u.searchParams.get('id');
+        if (id) {
+          for (const v of store.values()) { if (v.id === id) { json(res, { item: publicItem(v) }); return; } }
+          json(res, { item: null });
+          return;
+        }
+        json(res, { item: null });
+        return;
+      }
       if (p === '/api/quote') {
         const codes = (u.searchParams.get('codes') || '').split(',').filter(Boolean);
         json(res, { quotes: await getQuotes(codes) });
@@ -694,7 +709,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (p === '/api/push-test') {
-        const r = await sendWecom('【财讯雷达·测试】推送已连通 ✓ ' + new Date().toLocaleString('zh-CN') + '（自动推送引擎就绪，重要消息将自动推送到本群）');
+        const r = await sendWecom('【财讯雷达·测试】推送已连通 ✓ ' + new Date().toLocaleString('zh-CN') + '\n自动推送引擎就绪，重要消息将自动推送到本群\n点击查看：' + SITE_URL);
         pushLogAdd({ id: uid2(), ts: Date.now(), title: '测试推送', type: 'test', newsId: null, target: '企微群机器人', status: r.sent ? '已发送' : '发送失败', note: r.sent ? '' : (r.reason || '') });
         json(res, r);
         return;
