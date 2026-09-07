@@ -9,10 +9,10 @@
 </head>
 <body>
 
-<!-- 演示模式横幅（对应需求 COM-4/COM-5） -->
+<!-- 状态横幅（连接模式/免责声明，由 app.js 动态填充） -->
 <div class="demo-banner" id="demoBanner">
-  <span>🔬 <b>原型演示模式</b>：本页面全部资讯、行情、推送均为<b>模拟数据</b>，非真实市场信息，不构成任何投资建议；社交媒体传闻未经证实，仅作辅助参考。</span>
-  <button class="link-like" id="btnAbout" title="查看需求对照与说明">需求对照与说明 →</button>
+  <span id="bannerText">正在连接真实数据服务…</span>
+  <button class="link-like" id="btnAbout" title="查看数据来源与免责声明">数据来源与说明 →</button>
   <button class="banner-close" id="bannerClose" title="收起">×</button>
 </div>
 
@@ -20,8 +20,8 @@
   <div class="brand">
     <span class="logo">⚡</span>
     <div>
-      <div class="brand-name">财讯雷达 <em class="demo-tag">DEMO</em></div>
-      <div class="brand-sub">A股财经资讯聚合 · 快讯/公告/传闻 · 重要消息企微推送</div>
+      <div class="brand-name">财讯雷达 <em class="demo-tag" id="modeTag">连接中</em></div>
+      <div class="brand-sub">A股财经资讯聚合 · 真实快讯/公告 · 个股走势 · 重要消息企微推送</div>
     </div>
   </div>
 
@@ -88,7 +88,7 @@
 
     <!-- 热点榜（DP-4 / FR-07） -->
     <section class="panel" id="hotPanel">
-      <h3>🔥 热点榜</h3>
+      <h3>🔥 热点榜 <span class="hint">综合 时效 / 多源转载 / 重要度</span></h3>
       <div class="seg" id="hotTabs">
         <button class="seg-btn active" data-hot="realtime">实时</button>
         <button class="seg-btn" data-hot="today">当日</button>
@@ -105,7 +105,7 @@
         <button class="btn btn-primary btn-sm" id="watchAddBtn">+ 添加</button>
       </div>
       <ul id="watchList" class="watch-list"></ul>
-      <div class="watch-tip">订阅后，该股关联的「重要消息」将模拟推送到企业微信（FR-09）。</div>
+      <div class="watch-tip">订阅后，该股关联的「重要消息」将尝试推送至企业微信（FR-09，服务端配置 WECOM_WEBHOOK 可真实发送）。</div>
     </section>
   </aside>
 </div>
@@ -115,7 +115,7 @@
     <span>© 财讯雷达 · 原型（v1.1 需求落地）</span>
     <button class="link-like" id="btnAbout2">需求对照 / 数据保留 / 免责声明</button>
     <span class="retention-chip">正文在线保留 7 天 · 定时清理</span>
-    <span class="foot-muted">数据源（演示标识）：财联社 · 华尔街见闻 · 东方财富 · 同花顺 · 巨潮资讯 · 上交所/深交所 · Finnhub · 雪球热帖 · 微博</span>
+    <span class="foot-muted">数据源（真实公开接口）：新浪财经7×24/滚动 · 巨潮资讯网公告（szse/sse） · 东方财富行情（延时） · 腾讯证券/新浪 日K · 雪球/微博（需授权，未接入）。内容版权归原平台，本站仅聚合展示标题/摘要并保留原文链接；页面信息仅供参考，不构成任何投资建议。</span>
   </div>
 </footer>
 
@@ -126,7 +126,7 @@
     <h3>💬 企业微信推送（模拟）</h3>
     <button class="drawer-close" id="pushClose">×</button>
   </div>
-  <p class="drawer-sub">对应 FR-09：重要消息自动推送；去重后同一事件仅推 1 条；同一标的 5 分钟内不重复推；含频控与免打扰策略。</p>
+  <p class="drawer-sub">真实「重要消息」自动进入推送队列：同事件合并仅推 1 条、同一标的 5 分钟内不重复；服务端配置 WECOM_WEBHOOK（企微群机器人）后真实发送，未配置则为本地模拟。</p>
   <ul id="pushList" class="push-list"></ul>
   <div class="drawer-actions">
     <button class="btn btn-ghost btn-sm" id="btnTriggerPush">▶ 模拟触发一条重要消息推送</button>

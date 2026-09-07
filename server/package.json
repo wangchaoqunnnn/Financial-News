@@ -1,0 +1,13 @@
+{
+  "name": "financial-news-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "财经资讯聚合平台 - 真实数据后端代理（快讯/公告/行情/K线）",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
