@@ -604,7 +604,16 @@
   /* ---------- 关于/数据源 ---------- */
   function openAbout() {
     var socialNote = '';
-    if (MODE === 'live' && meta && meta.social) socialNote = '<div class="social-note">社交传闻源：' + esc(meta.social.reason || '未接入') + '。真实媒体中"传/曝/知情人士"类消息已如实标注<b>未经证实</b>并默认不推送。</div>';
+    if (MODE === 'live' && meta && meta.social) {
+      var s = meta.social, parts = [];
+      ['xueqiu', 'weibo'].forEach(function (key) {
+        var o = s[key]; if (!o) return;
+        var label = key === 'xueqiu' ? '雪球' : '微博';
+        parts.push(label + (o.configured ? (o.ok ? '已启用 ✓' : '已配置但请求失败：' + (o.err || '未知')) : '未配置 Cookie'));
+      });
+      socialNote = '<div class="social-note"><b>社交源状态：</b>' + parts.join('；') + '。<br>' + esc(s.guide || '') +
+        '<br>真实媒体中"传/曝/知情人士"类消息不受 Cookie 影响，已如实标注<b>未经证实</b>并默认不推送。</div>';
+    }
     openModal(
       '<button class="m-close" data-act="close-modal">×</button><div class="abt"><h3>关于财讯雷达（真实数据版 v1.2）</h3>' +
       '<p style="color:var(--muted);font-size:13px">当前模式：<b>' + (MODE === 'live' ? '实时数据（live）' : '离线演示（demo）') + '</b>，资讯共 ' + items.length + ' 条（近 7 日，自动清理）。</p>' +

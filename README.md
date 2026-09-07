@@ -35,7 +35,42 @@ PORT=8899 node server/server.js
 | 分时图 | 东方财富 push2delay trends2 | 价格+均价+昨收 |
 | 日K | 腾讯证券（前复权，备选：新浪） | 160 个交易日 |
 
-> 雪球/微博直连需要登录授权或第三方舆情 API，**本期未接入**（见页面"数据来源与说明"）。
+> 雪球/微博直连需要登录授权或第三方舆情 API，默认关闭。启用方法见下文「社交源（雪球/微博）授权」。
+
+## 社交源（雪球/微博）授权
+
+雪球/微博的公开数据接口需要**登录态 Cookie**（雪球返回 400016、微博需授权即为此原因）。配置后服务端会自动抓取「雪球热帖」「微博热搜（财经相关）」进入"传闻"频道（一律标注**未经证实**、默认不推送）。
+
+**第 1 步：获取 Cookie（浏览器操作）**
+
+1. 用 Chrome/Edge 登录 https://xueqiu.com （雪球）和 https://weibo.com 或 https://m.weibo.cn （微博）；
+2. 按 `F12` 打开开发者工具 → 切到 **Application（应用）** 面板 → 左侧 **Cookies** → 点击站点域名；
+3. 逐条 Cookie 双击 **Value** 全选复制并拼接，或更简单：切到 **Network** 面板 → 刷新页面 → 点任意 xueqiu.com/m.weibo.cn 请求 → **Request Headers** 中找到 `Cookie:` 一整行，把整行值复制下来；
+4. 关键 Cookie 参考：雪球 `xq_a_token`（及 `u`、`xqat`）；微博 `SUB`、`SUBP`（m.weibo.cn 另需 `WBPSESS`）。直接整串复制最稳妥。
+
+**第 2 步：把 Cookie 交给服务端（二选一）**
+
+方式 A：环境变量（PowerShell）
+
+```powershell
+$env:XUEQIU_COOKIE="xq_a_token=xxxx; u=xxxx; xqat=xxxx"
+$env:WEIBO_COOKIE="SUB=xxxx; SUBP=xxxx"
+node server/server.js
+```
+
+方式 B：配置文件（更便于管理，已被 .gitignore 排除、不会提交）
+
+```json
+// server/cookies.json
+{ "xueqiu": "xq_a_token=…; u=…; …", "weibo": "SUB=…; SUBP=…; …" }
+```
+
+保存后**重启** `node server/server.js`。页面右上角"数据来源与说明"会显示"雪球：已启用 ✓ / 微博：已启用 ✓"及最近的请求错误。
+
+**注意**
+- Cookie 等同账号凭证，**切勿提交到 Git/公开分享**（本项目已忽略 `server/cookies.json`）；
+- 雪球/微博接口随时可能调整或触发风控，偶发失败属正常（页面会显示错误原因，服务端自动重试）；
+- 请遵守目标平台服务条款与 robots 约定，控制频率（本项目已内置 30s/60s 节流），仅用于个人研究。
 
 ## 处理规则（轻量启发式，已在页面明示）
 

@@ -40,6 +40,21 @@ function marketOf(code) {
 }
 function secidOf(code) { const m = marketOf(code); return (m === 'sh' ? 1 : 0) + '.' + code; }
 
+/* ---------------- 社交源授权（Cookie，默认关闭，配置后自动启用） ----------------
+ * 读取优先级：环境变量 XUEQIU_COOKIE / WEIBO_COOKIE > server/cookies.json（已 gitignore）
+ * 获取方式见 README「社交源（雪球/微博）授权」一节。Cookie 等同账号凭证，切勿提交/外传。
+ */
+const COOKIE_FILE = path.join(__dirname, 'cookies.json');
+function loadCookieFile() { try { if (fs.existsSync(COOKIE_FILE)) return JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf8')); } catch (e) { console.warn('[cookies.json] 解析失败:', e.message); } return {}; }
+const CFG_COOKIES = loadCookieFile();
+const XQ_COOKIE = process.env.XUEQIU_COOKIE || CFG_COOKIES.xueqiu || '';
+const WB_COOKIE = process.env.WEIBO_COOKIE || CFG_COOKIES.weibo || '';
+const SOCIAL = {
+  xueqiu: { configured: !!XQ_COOKIE, ok: false, last: 0, err: XQ_COOKIE ? null : '未配置 XUEQIU_COOKIE' },
+  weibo:  { configured: !!WB_COOKIE, ok: false, last: 0, err: WB_COOKIE ? null : '未配置 WEIBO_COOKIE' }
+};
+const SOCIAL_GUIDE = '如何启用：浏览器登录雪球/微博后，F12→Application→Cookies 复制完整 Cookie 字符串，设为环境变量 XUEQIU_COOKIE / WEIBO_COOKIE，或写入 server/cookies.json（{"xueqiu":"…","weibo":"…"}）后重启服务。';
+
 /* ---------------- 证券代码→公司词典（东方财富沪深A股全列表） ---------------- */
 const universe = new Map();   // code -> {code,name,ind}
 let universeReady = false;
@@ -137,6 +152,7 @@ function classify(item) {
   const title = item.title || '', body = item.summary + (item.body || '');
   const text = title + ' ' + clip(body, 600);
   if (item.sourceType === 'cninfo') { item.type = '公告'; item.annType = guessAnn(title); }
+  else if (item.sourceType === 'social') { item.type = '传闻'; item.rumor = true; item.imp = false; }   // 社交内容一律按"未经证实"处理
   else if (KW_RUMOR.test(title)) { item.type = '传闻'; item.rumor = true; item.imp = false; }
   else if (item.sourceType === 'zhibo') item.type = '快讯';
   else item.type = (item.summary || '').length >= 90 ? '深度' : '快讯';
@@ -401,6 +417,78 @@ async function sendWecom(text) {
   return { sent: j.errcode === 0, reason: j.errmsg || '', errcode: j.errcode };
 }
 
+/* ---------------- 源适配器：雪球热帖 / 微博热搜（需 Cookie） ---------------- */
+function parseSocialTime(v) {
+  if (typeof v === 'number') { const t = v > 1e12 ? v : v * 1000; return Math.min(t, Date.now()); }
+  if (typeof v === 'string') { const t = new Date(v.replace(/-/g, '/')).getTime(); return isFinite(t) ? Math.min(t, Date.now()) : Date.now(); }
+  return Date.now();
+}
+async function pollXueqiu() {
+  if (!XQ_COOKIE) return 0;
+  if (Date.now() - SOCIAL.xueqiu.last < 30000) return 0;   // 30s 节流
+  SOCIAL.xueqiu.last = Date.now();
+  try {
+    const r = await fet('https://xueqiu.com/statuses/hot/listV2.json?since_id=-1&max_id=-1&size=15', {
+      headers: { 'User-Agent': UA, Referer: 'https://xueqiu.com/', Cookie: XQ_COOKIE }
+    });
+    const j = await r.json();
+    const items = (j && j.items) || [];
+    const list = [];
+    for (const it of items) {
+      const d = it && it.data;
+      if (!d) continue;
+      const txt = stripHtml(d.text || d.title || '');
+      if (txt.length < 10) continue;
+      list.push({
+        srcTag: 'xqhot', sourceType: 'social', source: '雪球热帖', title: clip(txt, 60),
+        summary: clip(txt, 220), body: clip(txt, 500),
+        link: d.status_id || d.id ? 'https://xueqiu.com/' + (d.status_id || d.id) : 'https://xueqiu.com/',
+        time: parseSocialTime(d.created_at), codes: extractCodes(txt)
+      });
+    }
+    const added = addItems(list);
+    SOCIAL.xueqiu.ok = true; SOCIAL.xueqiu.err = null;
+    return added;
+  } catch (e) { SOCIAL.xueqiu.ok = false; SOCIAL.xueqiu.err = e.message; return 0; }
+}
+/* 微博：取实时热搜话题并按财经相关性过滤（含雪球/微博通用过滤词） */
+const WB_HOT_RE = /股|基金|央行|证监会|涨停|跌停|银行|券商|黄金|美元|地产|白酒|医药|芯片|半导体|新能源|理财|降息|A股|行情/;
+async function pollWeibo() {
+  if (!WB_COOKIE) return 0;
+  if (Date.now() - SOCIAL.weibo.last < 60000) return 0;    // 60s 节流
+  SOCIAL.weibo.last = Date.now();
+  try {
+    const url = 'https://m.weibo.cn/api/container/getIndex?containerid=106003type%3D1%26filter_type%3Drealtimehot';
+    const r = await fet(url, { headers: { 'User-Agent': UA, Referer: 'https://m.weibo.cn/', Cookie: WB_COOKIE } });
+    const j = await r.json();
+    const words = [];
+    (function walk(o) {
+      if (!o || typeof o !== 'object') return;
+      if (typeof o.word === 'string' && o.word.length >= 2 && o.word.length <= 24) words.push(o.word);
+      if (typeof o.desc === 'string' && /^#/.test(o.desc) && o.desc.length <= 30) words.push(o.desc.replace(/#/g, ''));
+      if (typeof o.title_sub === 'string' && o.title_sub.length >= 2) words.push(o.title_sub);
+      for (const k of Object.keys(o)) { if (Array.isArray(o[k])) o[k].forEach(walk); else if (o[k] && typeof o[k] === 'object') walk(o[k]); }
+    })(j);
+    const seen = new Set();
+    const list = [];
+    for (const w of words) {
+      if (seen.has(w) || NOISE_RE.test(w) || !WB_HOT_RE.test(w)) continue;
+      seen.add(w);
+      const txt = '微博热搜：' + w;
+      list.push({
+        srcTag: 'wbreal', sourceType: 'social', source: '微博热搜', title: clip(txt, 60),
+        summary: '微博热搜话题「' + w + '」引发讨论（社交热度参考，未经证实）', body: txt,
+        link: 'https://s.weibo.com/weibo?q=' + encodeURIComponent(w),
+        time: Date.now(), codes: extractCodes(w + ' 财经话题')
+      });
+      if (list.length >= 12) break;
+    }
+    const added = addItems(list);
+    SOCIAL.weibo.ok = true; SOCIAL.weibo.err = null;
+    return added;
+  } catch (e) { SOCIAL.weibo.ok = false; SOCIAL.weibo.err = e.message; return 0; }
+}
+
 /* ---------------- 轮询调度 ---------------- */
 async function pollNews(initial) {
   const t0 = Date.now();
@@ -408,6 +496,8 @@ async function pollNews(initial) {
   const results = [];
   try { results.push(['sina7x24', await pollSinaZhibo()]); } catch (e) { touchSource('sinaZhibo', false, e.message); }
   try { results.push(['sinaRoll', await pollSinaRoll()]); } catch (e) { touchSource('sinaRoll', false, e.message); }
+  try { results.push(['xueqiu', await pollXueqiu()]); } catch (e) { SOCIAL.xueqiu.err = e.message; }
+  try { results.push(['weibo', await pollWeibo()]); } catch (e) { SOCIAL.weibo.err = e.message; }
   const added = results.reduce((s, x) => s + x[1], 0);
   console.log(`[poll] ${initial ? 'initial' : 'tick'} +${added} items, total=${store.size}, ${Date.now() - t0}ms`);
 }
@@ -470,7 +560,12 @@ const server = http.createServer(async (req, res) => {
         json(res, {
           mode: 'live', version: '1.2', time: Date.now(), retentionDays: 7, count: store.size,
           universe: universe.size, sources: srcState, universeReady,
-          social: { ok: false, reason: '雪球/微博直连需登录授权或第三方舆情API，本期未接入（真实媒体"传/曝"类消息已如实标注为传闻）' },
+          social: {
+            configured: SOCIAL.xueqiu.configured || SOCIAL.weibo.configured,
+            xueqiu: SOCIAL.xueqiu, weibo: SOCIAL.weibo,
+            ok: SOCIAL.xueqiu.ok || SOCIAL.weibo.ok,
+            guide: SOCIAL_GUIDE
+          },
           wecom: { configured: !!WECOM_WEBHOOK }
         });
         return;

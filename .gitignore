@@ -12,3 +12,6 @@ desktop.ini
 *.log
 tmp/
 *.tmp
+
+# 授权 Cookie（切勿提交！等同账号凭证）
+server/cookies.json
