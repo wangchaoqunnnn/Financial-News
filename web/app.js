@@ -46,7 +46,11 @@
   function apiUrl(path) { return apiBase + path; }
   async function api(path) {
     var r = await fetch(apiUrl(path), { headers: { 'Accept': 'application/json' } });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) {
+      var snip = '';
+      try { snip = (await r.text()).slice(0, 140).replace(/\s+/g, ' '); } catch (e) { /* */ }
+      throw new Error('HTTP ' + r.status + (snip ? '：' + snip : ''));
+    }
     return r.json();
   }
   async function api2(path, body) {
@@ -864,12 +868,14 @@
     $('feed').innerHTML = '<div class="card" style="padding:18px">' +
       '<h3 style="margin:0 0 8px">⚠️ 未能连接数据服务（实时模式）</h3>' +
       '<p style="font-size:13px;color:#475467">尝试请求 <code>' + esc(apiUrl('/api/meta')) + '</code> 失败' + (msg ? '：<span style="color:#b45309">' + esc(msg) + '</span>' : '') + '。</p>' +
+      '<p style="font-size:12.5px;color:#334155"><b>如何判断 404 来自谁：</b>HTTP 404 说明请求已到达服务器，但 nginx 没有把 <code>/api</code> 交给 Node（最常见：未添加 <code>location /api</code>，或反代地址末尾多写了 <code>/</code>）。若 Node 没在运行或端口不对，通常会是 502/504 而非 404。</p>' +
       '<div class="social-note" style="font-size:12.5px">' +
-      '<b>排查步骤（服务器端）：</b><br>① 服务器已运行 <code>node server/server.js</code>（监听 8899）；<br>' +
-      '② nginx 已配置 <code>location /api { proxy_pass http://127.0.0.1:8899; }</code>；<br>' +
-      '③ 验证：浏览器打开 <code>' + esc(apiUrl('/api/meta')) + '</code> 应返回 JSON（mode=live）。<br>' +
-      '后端也可部署在<b>独立域名/端口</b>：在下方填入其根地址（如 https://api.wangchaoqun.top），前端会自动重连。</div>' +
-      '<label style="font-size:12.5px;display:block;margin:8px 0 4px">数据服务地址（留空 = 与页面同源）：</label>' +
+      '<b>在服务器上执行以下两条命令定位（Linux）：</b><br>' +
+      '<pre style="background:#0f172a;color:#dbeafe;border-radius:8px;padding:8px 10px;font-size:12px;overflow-x:auto;white-space:pre-wrap">curl -i http://127.0.0.1:8899/api/meta\ncurl -i https://wangchaoqun.top/api/meta</pre>' +
+      '结果解读：<br>① 第一条应返回 <code>HTTP/1.1 200 … "mode":"live"</code> —— 若失败/拒绝：Node 未启动或未监听 8899；<br>' +
+      '② 第一条成功而第二条为 404：nginx 缺 <code>location /api</code>（见下），加好后 <code>nginx -t && nginx -s reload</code>；<br>' +
+      '③ 第二条为 502/504：反代目标写错（确认 <code>proxy_pass http://127.0.0.1:8899;</code> 结尾<b>不要</b>加 <code>/</code>）或端口不一致。</div>' +
+      '<label style="font-size:12.5px;display:block;margin:8px 0 4px">数据服务地址（留空 = 与页面同源；后端在别的主机时填，如 https://api.wangchaoqun.top）：</label>' +
       '<input class="set-input" id="apiBaseInput" placeholder="https://api.wangchaoqun.top 或留空" value="' + esc(apiBase) + '">' +
       '<p style="font-size:12px;color:var(--muted);margin:6px 0">' + cur + '（页面每 12 秒自动重试，连接成功后自动进入实时模式）</p>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
