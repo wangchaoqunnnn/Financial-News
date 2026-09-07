@@ -39,14 +39,18 @@
   var demoStocks = {};
   if (window.FN && FN.STOCKS) FN.STOCKS.forEach(function (s) { demoStocks[s.code] = s; });
 
-  /* ---------- API ---------- */
+  /* ---------- API（支持独立后端地址：?api=… 或本地存储 fn_api_base） ---------- */
+  var apiBase = '';
+  try { var _q = new URLSearchParams(location.search).get('api'); if (_q) apiBase = _q.replace(/\/+$/, ''); } catch (e) { /* */ }
+  if (!apiBase) apiBase = loadLS('fn_api_base', '');
+  function apiUrl(path) { return apiBase + path; }
   async function api(path) {
-    var r = await fetch(path, { headers: { 'Accept': 'application/json' } });
+    var r = await fetch(apiUrl(path), { headers: { 'Accept': 'application/json' } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   }
   async function api2(path, body) {
-    var r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var r = await fetch(apiUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     var j = await r.json().catch(function () { return {}; });
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     return j;
@@ -527,13 +531,16 @@
     if (mode === 'live') {
       setBanner('<span class="status-pill ok" style="margin-right:6px"><span class="sd"></span>实时模式</span> 真实公开数据：新浪财经快讯 · 巨潮公告 · 东财行情(延时) · 腾讯/新浪日K。仅供参考，不构成投资建议；内容版权归原平台。', 'LIVE');
       $('demoBanner').style.display = '';
+    } else if (mode === 'demo') {
+      setBanner('<b>内置演示数据（非实时，仅调试）</b>：点击右上角「⚙」下方的状态条或刷新页面可回到实时模式。后端启动后将自动切换。', '演示');
+      $('demoBanner').style.display = '';
     } else {
-      setBanner('<b>未连接数据服务</b>：当前展示<b>模拟演示数据</b>。真实模式请在项目目录运行 <code>node server/server.js</code> 后访问 <code>http://127.0.0.1:8899</code>。 <button class="btn btn-sm" id="btnRetry">重试连接</button>', '离线演示');
-      var btn = $('btnRetry'); if (btn) btn.addEventListener('click', function () { location.reload(); });
+      setBanner('<b>未连接数据服务</b>：请按下方面板提示启动后端（node server/server.js）或配置 /api 反代；页面每 12 秒自动重试。', '离线');
+      $('demoBanner').style.display = '';
     }
     var ab = $('btnAbout'); if (ab) ab.textContent = mode === 'live' ? '数据来源与说明 →' : '需求对照与说明 →';
     var tp = $('btnTriggerPush');
-    if (tp) tp.textContent = mode === 'live' ? '📨 发送测试消息到企微' : '▶ 模拟推送一条（演示）';
+    if (tp) tp.textContent = mode === 'live' ? '📨 发送测试消息到企微' : (mode === 'demo' ? '▶ 模拟推送一条（演示）' : '—');
   }
 
   /* ---------- 数据轮询（live） ---------- */
@@ -789,6 +796,13 @@
       else if (act === 'close-settings') { closeModal(); }
       else if (act === 'settings-save') { saveSettings(); }
       else if (act === 'wecom-test') { testWecomFromSettings(); }
+      else if (act === 'conn-retry') { tryConnect(); }
+      else if (act === 'demo-load') { loadManualDemo(); }
+      else if (act === 'api-save') {
+        var inp = $('apiBaseInput');
+        if (inp) { apiBase = inp.value.trim().replace(/\/+$/, ''); saveLS('fn_api_base', apiBase); }
+        tryConnect();
+      }
     });
   }
 
@@ -812,36 +826,71 @@
       }).catch(function () { toast('打开失败：服务不可达', 'warn'); });
     } else toast('该消息已超出 7 日保留期或已被清理', 'warn');
   }
-  async function bootLive() {
-    setMode('demo', null);
+  /* ---------- 引导：在线优先（不再自动降级为演示数据） ---------- */
+  var bootedLive = false, manualDemo = false, connTimer = null;
+  function startLive(m) {
+    if (bootedLive) return;
+    bootedLive = true; manualDemo = false;
+    meta = m; MODE = 'live';
+    setMode('live', m);
+    renderWatch();
+    pollFeed().then(function () { fetchServerPush(); tryOpenTarget(0); });
+    window.addEventListener('hashchange', function () { tryOpenTarget(0); });
+    window.addEventListener('popstate', function () { tryOpenTarget(0); });
+    setInterval(function () { pollFeed(); }, 15000);
+    setInterval(function () { refreshWatchQuotes(); }, 10000);
+    setInterval(function () { fetchServerPush(); }, 20000);
+    if (connTimer) { clearInterval(connTimer); connTimer = null; }
+  }
+  async function tryConnect() {
+    if (bootedLive) return true;
     try {
       var m = await api('/api/meta');
-      if (!m || m.mode !== 'live') throw new Error('bad meta');
-      meta = m;
-      setMode('live', m);
-      renderWatch();
-      await pollFeed();
-      refreshWatchQuotes();
-      fetchServerPush();
-      tryOpenTarget(0);
-      window.addEventListener('hashchange', function () { tryOpenTarget(0); });
-      window.addEventListener('popstate', function () { tryOpenTarget(0); });
-      setInterval(function () { pollFeed(); }, 15000);
-      setInterval(function () { refreshWatchQuotes(); }, 10000);
-      setInterval(function () { fetchServerPush(); }, 20000);
+      if (!m || m.mode !== 'live') throw new Error('后端返回异常（mode=' + (m && m.mode) + '）');
+      startLive(m);
+      return true;
     } catch (e) {
-      // 后端不可达 → 离线演示
-      setMode('demo', null);
-      upsert(demoItems());
-      renderFeed(); renderImportant(); renderHot(); renderWatch();
-      demoPushInit();
+      if (!manualDemo) showOffline(e && e.message ? e.message : String(e));
+      return false;
     }
   }
-
+  function showOffline(msg) {
+    if (bootedLive) return;
+    MODE = 'demo';                 // 仅用于防止未授权操作，不加载任何演示数据
+    setMode('offline', null);
+    $('feedTitle').textContent = '后端连接失败';
+    $('feedEmpty').classList.add('hidden');
+    var cur = apiBase ? '当前后端：<b>' + esc(apiBase) + '</b>' : '当前后端：<b>与页面同源</b>（' + esc(apiUrl('/api/meta')) + '）';
+    $('feed').innerHTML = '<div class="card" style="padding:18px">' +
+      '<h3 style="margin:0 0 8px">⚠️ 未能连接数据服务（实时模式）</h3>' +
+      '<p style="font-size:13px;color:#475467">尝试请求 <code>' + esc(apiUrl('/api/meta')) + '</code> 失败' + (msg ? '：<span style="color:#b45309">' + esc(msg) + '</span>' : '') + '。</p>' +
+      '<div class="social-note" style="font-size:12.5px">' +
+      '<b>排查步骤（服务器端）：</b><br>① 服务器已运行 <code>node server/server.js</code>（监听 8899）；<br>' +
+      '② nginx 已配置 <code>location /api { proxy_pass http://127.0.0.1:8899; }</code>；<br>' +
+      '③ 验证：浏览器打开 <code>' + esc(apiUrl('/api/meta')) + '</code> 应返回 JSON（mode=live）。<br>' +
+      '后端也可部署在<b>独立域名/端口</b>：在下方填入其根地址（如 https://api.wangchaoqun.top），前端会自动重连。</div>' +
+      '<label style="font-size:12.5px;display:block;margin:8px 0 4px">数据服务地址（留空 = 与页面同源）：</label>' +
+      '<input class="set-input" id="apiBaseInput" placeholder="https://api.wangchaoqun.top 或留空" value="' + esc(apiBase) + '">' +
+      '<p style="font-size:12px;color:var(--muted);margin:6px 0">' + cur + '（页面每 12 秒自动重试，连接成功后自动进入实时模式）</p>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+      '<button class="btn btn-primary" data-act="api-save">保存地址并重连</button>' +
+      '<button class="btn btn-outline" data-act="conn-retry">立即重连</button>' +
+      '<button class="btn btn-ghost" data-act="demo-load">载入内置演示数据（仅调试，非实时）</button></div></div>';
+  }
+  function loadManualDemo() {
+    manualDemo = true; MODE = 'demo';
+    setMode('demo', null);
+    upsert(demoItems());
+    renderFeed(); renderImportant(); renderHot(); renderWatch();
+    demoPushInit();
+    toast('已载入内置演示数据（非实时）。后端连接成功后会自动切换回实时模式。', 'info');
+    if (connTimer) { clearInterval(connTimer); connTimer = null; }
+  }
   function boot() {
     tickClock(); setInterval(tickClock, 1000);
     bindEvents(); bindDelegation();
-    bootLive();
+    tryConnect();
+    if (!bootedLive) connTimer = setInterval(function () { tryConnect(); }, 12000);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

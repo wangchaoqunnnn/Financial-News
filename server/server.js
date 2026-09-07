@@ -619,6 +619,11 @@ const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
   try {
+    if (req.method === 'OPTIONS') {   // CORS 预检：支持前端跨域连接独立后端（如 api.wangchaoqun.top）
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' });
+      res.end();
+      return;
+    }
     if (p.startsWith('/api/')) {
       if (p === '/api/meta') {
         json(res, {
