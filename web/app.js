@@ -163,7 +163,21 @@
   /* ---------- 渲染：主信息流 ---------- */
   function renderFeed() {
     var list = filtered();
-    $('feed').innerHTML = list.map(function (it) { return cardHTML(it); }).join('');
+    var rumorEmptyNote = '';
+    if (state.type === '传闻' && !list.length && MODE === 'live') {
+      var s = meta && meta.social;
+      var bits = [];
+      if (s) {
+        bits.push('雪球：' + socialBit(s.xueqiu, '雪球') + '');
+        bits.push('微博：' + socialBit(s.weibo, '微博') + '');
+      }
+      rumorEmptyNote = '<div class="card" style="padding:14px;margin-bottom:10px">' +
+        '<h3 style="margin:0 0 6px">传闻频道当前为空</h3>' +
+        '<div class="social-note" style="margin:0 0 8px">' + bits.join('<br>') +
+        '<br><b>说明：</b>本频道内容来自 ① 配置并验证 Cookie 后的<b>雪球热帖 / 微博热搜（财经）</b>；② 真实媒体中"传/曝/知情人士"类消息（无需 Cookie，自动归类）。两类内容均标注<b>未经证实</b>、默认不推送。</div>' +
+        '<button class="btn btn-outline btn-sm" data-act="open-settings">⚙ 去设置：配置并验证 Cookie</button></div>';
+    }
+    $('feed').innerHTML = rumorEmptyNote + list.map(function (it) { return cardHTML(it); }).join('');
     $('feedEmpty').classList.toggle('hidden', list.length > 0);
     var parts = [];
     if (state.type !== '全部') parts.push(state.type);
@@ -172,6 +186,13 @@
     if (state.onlyImportant) parts.push('只看重要');
     $('feedTitle').textContent = (parts.length ? parts.join(' / ') : '实时信息流') + ' · 共 ' + list.length + ' 条（时间倒序，保留 7 日）';
   }
+  function socialBit(o, label) {
+    if (!o) return label + '：未知';
+    if (!o.configured) return '<b>' + label + '：未配置</b>（在 ⚙ 设置 填写并验证）';
+    if (o.ok) return '<b>' + label + '：已启用 ✓</b>';
+    return '<b>' + label + '：请求失败</b> — ' + (o.err ? stripHtmlInline(o.err) : '未知原因');
+  }
+  function stripHtmlInline(s) { var d = document.createElement('div'); d.innerHTML = s || ''; return d.textContent || d.innerText || ''; }
 
   /* ---------- 重要消息 / 热点榜 ---------- */
   function renderImportant() {
@@ -662,12 +683,15 @@
         ? '<input class="set-input" type="url" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…">'
         : '<textarea rows="2" placeholder="从浏览器 DevTools → Network 请求头中复制整串 Cookie 值（含分号）"></textarea>';
       var clear = conf ? '<label class="check" style="margin-top:4px"><input type="checkbox" class="set-clear"> <span>清除此项（保存后移除）</span></label>' : '';
+      var verify = type !== 'url'
+        ? '<div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap"><button class="btn btn-outline btn-sm" data-act="cookie-verify" data-src="' + key + '">🔍 验证 Cookie</button><span class="set-vres" id="vres-' + key + '"></span></div>'
+        : '';
       return '<div class="set-group" data-key="' + key + '">' +
-        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' + statusPill(conf) + '<b>' + esc(label) + '</b><span class="hint">' + esc(sub || '') + '</span></div>' + mask + input + clear + '</div>';
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' + statusPill(conf) + '<b>' + esc(label) + '</b><span class="hint">' + esc(sub || '') + '</span></div>' + mask + input + clear + verify + '</div>';
     }
     var html = '<button class="m-close" data-act="close-settings">×</button><div class="abt">' +
       '<h3 style="margin-top:2px">⚙ 设置 · 数据源授权与自动推送</h3>' +
-      '<p style="color:var(--muted);font-size:12.5px">提交后<b>立即生效、无需重启</b>：启用雪球/微博数据（进入「传闻」频道），并启动重要消息自动推送（去重 + 20s 频控）。配置仅保存在本机 <code>server/cookies.json</code>（已 gitignore，不会上传）。' +
+      '<p style="color:var(--muted);font-size:12.5px">Cookie 提交前会<b>先验证有效性</b>，无效会被拦截并提示原因（重新登录后再复制）。保存后立即生效、无需重启：数据进入「传闻」频道，重要消息自动推送（去重 + 20s 频控）。配置仅保存在本机 <code>server/cookies.json</code>（已 gitignore）。' +
       (MODE === 'live' ? '' : '<br><b style="color:#b45309">当前为离线演示模式：保存需先运行后端 node server/server.js。</b>') + '</p>' +
       group('xueqiu', '雪球 Cookie', '启用「雪球热帖」数据源', 'area', cfg.xueqiu, cfg.xueqiu && cfg.xueqiu.configured) +
       group('weibo', '微博 Cookie', '启用「微博热搜·财经」数据源', 'area', cfg.weibo, cfg.weibo && cfg.weibo.configured) +
@@ -677,17 +701,31 @@
       '<button class="btn btn-primary" data-act="settings-save">保存并立即启用</button>' +
       '<button class="btn btn-outline" data-act="wecom-test">📨 发送测试推送</button>' +
       '<button class="btn btn-ghost" data-act="close-settings">取消</button></div>' +
-      '<p style="font-size:11.5px;color:var(--muted);margin-top:10px">提示：如何复制 Cookie —— 登录雪球/微博 → F12 → Network → 刷新 → 点击任意本域请求 → Request Headers 中整串复制 <code>Cookie:</code> 的值。Cookie 等同账号凭证，请勿外传。</p>' +
+      '<p style="font-size:11.5px;color:var(--muted);margin-top:10px">提示：如何复制 Cookie —— 登录雪球/微博 → F12 → Network → 刷新 → 点击任意本域请求 → Request Headers 中整串复制 <code>Cookie:</code> 的值。<b>雪球若提示 WAF 拦截</b>，请确认整串含 acw_* 验证参数（服务器与浏览器非同 IP 时仍可能受限）。Cookie 等同账号凭证，请勿外传。</p>' +
       '</div>';
     openModal(html);
   }
-  function saveSettings() {
-    var body = {};
+  var cookieVerified = {};   // {xueqiu:true,...} 本窗口内已验证
+  async function verifyCookie(src, cookie) {
+    var res = $('vres-' + src); if (!res) return;
+    if (!cookie) { res.innerHTML = '<span style="color:#b45309">请先在上方粘贴 Cookie 再验证。</span>'; return; }
+    res.innerHTML = '<span style="color:var(--muted)">验证中…</span>';
+    try {
+      var r = await api2('/api/social/validate', { source: src, cookie: cookie });
+      if (r.valid) { cookieVerified[src] = true; res.innerHTML = '<span class="status-pill ok" style="background:#f0fdf4"><span class="sd"></span>' + esc(r.message) + '</span>'; }
+      else { delete cookieVerified[src]; res.innerHTML = '<span style="color:#dc2626;font-size:12px">✗ ' + esc(r.message) + '</span>'; }
+      return r;
+    } catch (e) { delete cookieVerified[src]; res.innerHTML = '<span style="color:#dc2626;font-size:12px">验证请求失败：' + esc(e.message) + '</span>'; return { valid: false }; }
+  }
+  async function saveSettings() {
+    var res = $('setResult');
+    if (!res) return;
+    var body = {}, checks = [], ok = true;
     ['xueqiu', 'weibo'].forEach(function (k) {
       var g = document.querySelector('.set-group[data-key="' + k + '"]'); if (!g) return;
       var ta = g.querySelector('textarea'); var cl = g.querySelector('.set-clear');
       if (cl && cl.checked) body[k] = null;
-      else if (ta && ta.value.trim()) body[k] = ta.value.trim();
+      else if (ta && ta.value.trim()) { checks.push({ k: k, v: ta.value.trim() }); }
     });
     var gw = document.querySelector('.set-group[data-key="wecom"]');
     if (gw) {
@@ -695,13 +733,24 @@
       if (clw && clw.checked) body.wecom = null;
       else if (inp && inp.value.trim()) body.wecom = inp.value.trim();
     }
-    var res = $('setResult');
-    if (!res) return;
+    // 先校验新填写的 Cookie（未验证/已验证失败的阻止保存）
+    for (var i = 0; i < checks.length; i++) {
+      var ck = checks[i];
+      if (cookieVerified[ck.k] === true) { body[ck.k] = ck.v; continue; }
+      res.innerHTML = '<div class="loading">正在验证 ' + (ck.k === 'xueqiu' ? '雪球' : '微博') + ' Cookie…</div>';
+      var vr = await verifyCookie(ck.k, ck.v);
+      if (vr && vr.valid) { body[ck.k] = ck.v; } else { ok = false; }
+    }
+    if (!ok) {
+      res.innerHTML = '<div class="social-note">⚠️ <b>Cookie 验证未通过，未保存。</b>请按上方红色提示处理（如重新登录复制最新整串 Cookie）后再次保存。</div>';
+      return;
+    }
     if (!Object.keys(body).length) { res.innerHTML = '<div class="social-note">没有需要保存的变更：请填写内容，或勾选「清除此项」后保存。</div>'; return; }
     res.innerHTML = '<div class="loading">正在提交并启用…</div>';
     api2('/api/settings', body).then(function (r) {
       res.innerHTML = '<div class="social-note" style="background:#f0fdf4;border-color:#bbe7cd;color:#166534">✅ 保存成功：雪球=' + (r.xueqiu ? '启用' : '关闭') + '，微博=' + (r.weibo ? '启用' : '关闭') + '，企微自动推送=' + (r.wecom ? '开启' : '关闭') + '。数据源已开始抓取，重要消息将自动推送到企微群。</div>';
       toast('设置已保存并生效', 'ok');
+      cookieVerified = {};
       if (MODE === 'live') { pollFeed(); fetchServerPush(); }
       setTimeout(function () { openSettings(); }, 1500);
     }).catch(function (e) { res.innerHTML = '<div class="social-note">保存失败：' + esc(e.message) + '</div>'; });
@@ -807,6 +856,13 @@
         if (inp) { apiBase = inp.value.trim().replace(/\/+$/, ''); saveLS('fn_api_base', apiBase); }
         tryConnect();
       }
+      else if (act === 'cookie-verify') {
+        var src = t.dataset.src;
+        var g = document.querySelector('.set-group[data-key="' + src + '"]');
+        var v = g ? g.querySelector('textarea').value.trim() : '';
+        verifyCookie(src, v);
+      }
+      else if (act === 'open-settings') { openSettings(); }
     });
   }
 
