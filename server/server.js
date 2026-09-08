@@ -722,6 +722,16 @@ function notFound(req, res, pathname) {
 }
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
+/* 版本号（读取 git 当前提交短哈希，便于部署后验证是否已更新） */
+let VERSION = 'dev';
+try {
+  const head = fs.readFileSync(path.join(ROOT, '.git', 'HEAD'), 'utf8').trim();
+  if (head.startsWith('ref:')) {
+    const ref = head.slice(5).trim();
+    VERSION = fs.readFileSync(path.join(ROOT, '.git', ref), 'utf8').trim().slice(0, 8);
+  } else VERSION = head.slice(0, 8);
+} catch (e) { /* 非 git 部署时保持 dev */ }
+
 /* ---------------- HTTP API ---------------- */
 const json = (res, obj, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(obj)); };
 function publicItem(it) {
@@ -743,7 +753,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/')) {
       if (p === '/api/meta') {
         json(res, {
-          mode: 'live', version: '1.3', time: Date.now(), retentionDays: 7, count: store.size,
+          mode: 'live', version: VERSION, time: Date.now(), retentionDays: 7, count: store.size,
           universe: universe.size, sources: srcState, universeReady,
           social: {
             configured: SOCIAL.xueqiu.configured || SOCIAL.weibo.configured,
