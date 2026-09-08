@@ -696,6 +696,7 @@
       group('xueqiu', '雪球 Cookie', '启用「雪球热帖」数据源', 'area', cfg.xueqiu, cfg.xueqiu && cfg.xueqiu.configured) +
       group('weibo', '微博 Cookie', '启用「微博热搜·财经」数据源', 'area', cfg.weibo, cfg.weibo && cfg.weibo.configured) +
       group('wecom', '企业微信推送机器人 URL', '群机器人 Webhook：企微群 → 添加群机器人 → 复制地址', 'url', cfg.wecom, cfg.wecom && cfg.wecom.configured) +
+      pushPolicyHTML(cfg) +
       '<div id="setResult"></div>' +
       '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">' +
       '<button class="btn btn-primary" data-act="settings-save">保存并立即启用</button>' +
@@ -706,6 +707,20 @@
     openModal(html);
   }
   var cookieVerified = {};   // {xueqiu:true,...} 本窗口内已验证
+  function pushPolicyHTML(cfg) {
+    var pp = (cfg && cfg.pushPolicy) || { events: [], requireCode: true, hourly: 12 };
+    var evs = (pp.events || []).map(function (e) {
+      return '<label class="check pp-item"><input type="checkbox" class="pp-ev" data-ev="' + esc(e.key) + '"' + (e.on ? ' checked' : '') + '> <span>' + esc(e.label) + '</span></label>';
+    }).join('');
+    return '<div class="set-group">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>🔕 推送过滤（重要消息按事件类别开关）</b><span class="hint">关闭的类别不会推送；勾选即恢复</span></div>' +
+      '<div style="font-size:12px;color:var(--muted);margin:4px 0 2px">默认已精简（减持/问询/质押/解禁/分红/中标/澄清/高管变动 默认关闭以降低频率）</div>' +
+      '<div class="pp-grid">' + evs + '</div>' +
+      '<div style="display:flex;gap:14px;margin-top:8px;flex-wrap:wrap;align-items:center">' +
+      '<label class="check"><input type="checkbox" id="ppReq"' + (pp.requireCode ? ' checked' : '') + '><span>快讯/深度需关联到具体个股才推（政策/美股除外）</span></label>' +
+      '<label style="font-size:12.5px;display:inline-flex;gap:6px;align-items:center">每小时上限 <input type="number" id="ppHour" min="1" max="120" value="' + (+pp.hourly || 12) + '" style="width:64px;border:1px solid var(--line);border-radius:6px;padding:4px 6px"> 条</label>' +
+      '</div></div>';
+  }
   async function verifyCookie(src, cookie) {
     var res = $('vres-' + src); if (!res) return;
     if (!cookie) { res.innerHTML = '<span style="color:#b45309">请先在上方粘贴 Cookie 再验证。</span>'; return; }
@@ -733,6 +748,15 @@
       if (clw && clw.checked) body.wecom = null;
       else if (inp && inp.value.trim()) body.wecom = inp.value.trim();
     }
+    // 推送过滤策略（勾选/上限/个股门槛）
+    var ppEv = {};
+    document.querySelectorAll('.pp-ev').forEach(function (cb) { ppEv[cb.dataset.ev] = cb.checked; });
+    var ppReqEl = $('ppReq'), ppHourEl = $('ppHour');
+    body.pushPolicy = {
+      events: ppEv,
+      requireCode: ppReqEl ? ppReqEl.checked : true,
+      hourly: Math.max(1, Math.min(120, parseInt((ppHourEl && ppHourEl.value) || '12', 10) || 12))
+    };
     // 先校验新填写的 Cookie（未验证/已验证失败的阻止保存）
     for (var i = 0; i < checks.length; i++) {
       var ck = checks[i];

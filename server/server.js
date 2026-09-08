@@ -58,7 +58,10 @@ const SOCIAL = {
 const SOCIAL_GUIDE = '在页面「⚙ 设置」中粘贴从浏览器登录后复制的完整 Cookie 字符串即可（无需重启）；也可设环境变量 XUEQIU_COOKIE / WEIBO_COOKIE 或写入 server/cookies.json。';
 function persistCookies() {
   try {
-    const obj = Object.assign(loadCookieFile(), { xueqiu: XQ_COOKIE, weibo: WB_COOKIE, wecom: wecomWebhook });
+    const obj = Object.assign(loadCookieFile(), {
+      xueqiu: XQ_COOKIE, weibo: WB_COOKIE, wecom: wecomWebhook,
+      pushPolicy: { events: Object.assign({}, PUSH_POLICY.events), requireCode: PUSH_POLICY.requireCode, hourly: PUSH_POLICY.hourly }
+    });
     fs.writeFileSync(COOKIE_FILE, JSON.stringify(obj, null, 2), 'utf8');
   } catch (e) { console.warn('[cookies.json] 写入失败:', e.message); }
 }
@@ -67,6 +70,7 @@ function applySettings(body) {
   if (body && Object.prototype.hasOwnProperty.call(body, 'xueqiu')) { XQ_COOKIE = body.xueqiu ? String(body.xueqiu) : ''; SOCIAL.xueqiu.configured = !!XQ_COOKIE; SOCIAL.xueqiu.last = 0; SOCIAL.xueqiu.ok = false; SOCIAL.xueqiu.err = XQ_COOKIE ? null : '未配置 Cookie'; changed.xueqiu = 1; }
   if (body && Object.prototype.hasOwnProperty.call(body, 'weibo')) { WB_COOKIE = body.weibo ? String(body.weibo) : ''; SOCIAL.weibo.configured = !!WB_COOKIE; SOCIAL.weibo.last = 0; SOCIAL.weibo.ok = false; SOCIAL.weibo.err = WB_COOKIE ? null : '未配置 Cookie'; changed.weibo = 1; }
   if (body && Object.prototype.hasOwnProperty.call(body, 'wecom')) { wecomWebhook = body.wecom ? String(body.wecom) : ''; changed.wecom = 1; }
+  if (body && body.pushPolicy) { mergePolicy(body.pushPolicy); changed.pushPolicy = 1; }
   if (Object.keys(changed).length) persistCookies();
   return changed;
 }
@@ -443,6 +447,7 @@ const PUSH = {
   queue: [],           // 待发送队列
   sentKeys: new Set(), // 同事件去重
   lastSent: 0,         // 频控：距上次发送
+  sentTs: [],          // 成功发送时间戳（每小时上限用）
   enabled: false,
   suppressInitial: true
 };
@@ -453,10 +458,58 @@ function pushLogAdd(entry) { PUSH.log.unshift(entry); if (PUSH.log.length > 100)
 const SITE_URL = (process.env.SITE_URL || 'https://wangchaoqun.top/news').replace(/\/+$/, '');
 function newsUrl(id) { return SITE_URL + '#n=' + encodeURIComponent(id); }
 
+/* 事件类别定义（用户可在设置页逐项开关，决定是否推送） */
+const EVENT_DEFS = [
+  ['policy', '宏观政策（央行/降准降息/证监会/国常会）', /央行|降准|降息|LPR|MLF|逆回购|国常会|汇金|发改委|财政部|证监会|印花税|存款准备金/],
+  ['usp', '美股/美联储/美债', /美联储|美股|纳指|道指|标普|中概股|美债/],
+  ['earn', '业绩预告/财报', /业绩预告|业绩快报|预增|预亏|财报|季报|年报|净利润|扭亏|营收/],
+  ['buyback', '回购股份', /回购/],
+  ['increase', '股东增持', /增持/],
+  ['decrease', '股东减持', /减持/],
+  ['ma', '收购/并购/合并/重组', /收购|并购|合并|重组|借壳|要约|股权转让/],
+  ['suspend', '停牌/复牌', /停牌|复牌/],
+  ['risk', '立案/调查/处罚/退市', /立案|调查|处罚|退市|风险警示|被查|ST/],
+  ['query', '监管问询/函件', /问询函|监管函|关注函|监管问询/],
+  ['contract', '中标/重大合同', /中标|重大合同|大额订单/],
+  ['pledge', '股权质押', /质押/],
+  ['unlock', '限售解禁', /解禁/],
+  ['div', '分红/高送转', /分红|派现|送转|高送转|股利/],
+  ['clarify', '澄清公告', /澄清/],
+  ['mgmt', '高管/人事变动', /董事长|高管|总经理|辞职|离职|人事变动|任免/]
+];
+const EVENT_DEFAULT_ON = ['policy', 'usp', 'earn', 'ma', 'suspend', 'risk'];
+/* 推送策略（可被设置页修改并持久化到 cookies.json） */
+const PUSH_POLICY = {
+  events: {},
+  requireCode: true,    // 快讯/深度 需关联具体个股（指数级泛涨跌不推）
+  hourly: 12            // 每小时推送上限
+};
+EVENT_DEFS.forEach(([k]) => { PUSH_POLICY.events[k] = EVENT_DEFAULT_ON.includes(k); });
+function loadPolicy() { try { const p = CFG_COOKIES.pushPolicy || {}; if (p.events) for (const k of Object.keys(PUSH_POLICY.events)) if (typeof p.events[k] === 'boolean') PUSH_POLICY.events[k] = p.events[k]; if (typeof p.requireCode === 'boolean') PUSH_POLICY.requireCode = p.requireCode; if (p.hourly) PUSH_POLICY.hourly = Math.max(1, Math.min(120, +p.hourly || 12)); } catch (e) { /* */ } }
+loadPolicy();
+function detectEvents(it) {
+  if (it.ev) return it.ev;
+  const s = (it.title || '') + ' ' + (it.summary || '');
+  const out = [];
+  for (const [k, , re] of EVENT_DEFS) if (re.test(s)) out.push(k);
+  it.ev = out;
+  return out;
+}
+function mergePolicy(p) {
+  if (!p || typeof p !== 'object') return;
+  if (p.events && typeof p.events === 'object') for (const k of Object.keys(PUSH_POLICY.events)) if (typeof p.events[k] === 'boolean') PUSH_POLICY.events[k] = p.events[k];
+  if (typeof p.requireCode === 'boolean') PUSH_POLICY.requireCode = p.requireCode;
+  if (p.hourly) PUSH_POLICY.hourly = Math.max(1, Math.min(120, +p.hourly || 12));
+}
+
 function isAutoPushWorthy(it) {
   if (!it || !it.imp || it.type === '传闻' || it.rumor) return false;
-  if (it.type === '公告' && !(it.annType && PUSH_CRITICAL_ANN.test(it.annType))) return false;
   if (!pushRelevant(it)) return false;      // 仅推送与 A股 / 美股 市场相关的消息
+  const ev = detectEvents(it);
+  if (!ev.length) return false;             // 未命中任何事件类别 → 不推（降噪）
+  const anyOn = ev.some(k => PUSH_POLICY.events[k]);
+  if (!anyOn) return false;                 // 用户在该事件类别上关闭了推送
+  if (PUSH_POLICY.requireCode && it.type !== '公告' && !(it.codes && it.codes.length) && !ev.some(k => k === 'policy' || k === 'usp')) return false;
   return true;
 }
 /* 推送相关性过滤：A股市场 / 美股市场（美股含美联储/美债等直接驱动因素）；
@@ -482,7 +535,10 @@ function wecomText(it) {
 async function drainPushQueue() {
   while (PUSH.queue.length) {
     if (!wecomWebhook) { PUSH.enabled = false; return; }
-    const gap = Date.now() - PUSH.lastSent;
+    const now = Date.now();
+    const recent = PUSH.sentTs.filter(ts => now - ts < 3600e3);
+    if (recent.length >= PUSH_POLICY.hourly) return;   // 每小时推送上限（设置可调）
+    const gap = now - PUSH.lastSent;
     if (gap < PUSH_MIN_GAP) return;
     const it = PUSH.queue.shift();
     const key = hashKey(it.title) + ':' + Math.floor((it.ts || Date.now()) / 3600e3);
@@ -491,7 +547,8 @@ async function drainPushQueue() {
     if (PUSH.sentKeys.size > 300) PUSH.sentKeys.clear();
     const r = await sendWecom(wecomText(it));
     PUSH.lastSent = Date.now();
-    pushLogAdd({ id: uid2(), ts: Date.now(), title: it.title, type: it.type, newsId: it.id, target: '企微群机器人', status: r.sent ? '已发送' : '发送失败', note: r.sent ? '' : (r.reason || '') });
+    PUSH.sentTs.push(PUSH.lastSent);
+    pushLogAdd({ id: uid2(), ts: PUSH.lastSent, title: it.title, type: it.type, newsId: it.id, target: '企微群机器人', status: r.sent ? '已发送' : '发送失败', note: r.sent ? '' : (r.reason || '') });
     if (!r.sent) PUSH.queue.unshift(it);               // 失败放回队尾稍后重试一次
   }
 }
@@ -695,7 +752,14 @@ const server = http.createServer(async (req, res) => {
             guide: SOCIAL_GUIDE
           },
           wecom: { configured: !!wecomWebhook },
-          push: { enabled: !!wecomWebhook, auto: PUSH.queue.length, log: PUSH.log.length },
+          push: {
+            enabled: !!wecomWebhook, auto: PUSH.queue.length, log: PUSH.log.length,
+            policy: {
+              on: EVENT_DEFS.filter(([k]) => PUSH_POLICY.events[k]).length,
+              requireCode: PUSH_POLICY.requireCode,
+              hourly: PUSH_POLICY.hourly
+            }
+          },
           siteUrl: SITE_URL
         });
         return;
@@ -796,10 +860,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === '/api/settings') {
         if (req.method === 'GET') {
+          const policyView = {
+            events: EVENT_DEFS.map(([k, label]) => ({ key: k, label, on: !!PUSH_POLICY.events[k] })),
+            requireCode: PUSH_POLICY.requireCode,
+            hourly: PUSH_POLICY.hourly
+          };
           json(res, {
             xueqiu: { configured: SOCIAL.xueqiu.configured, ok: SOCIAL.xueqiu.ok, err: SOCIAL.xueqiu.err, mask: XQ_COOKIE ? XQ_COOKIE.slice(0, 6) + '…(已配置，长度 ' + XQ_COOKIE.length + ')' : '' },
             weibo: { configured: SOCIAL.weibo.configured, ok: SOCIAL.weibo.ok, err: SOCIAL.weibo.err, mask: WB_COOKIE ? WB_COOKIE.slice(0, 6) + '…(已配置，长度 ' + WB_COOKIE.length + ')' : '' },
             wecom: { configured: !!wecomWebhook, mask: wecomWebhook ? wecomWebhook.slice(0, 30) + '…' : '' },
+            pushPolicy: policyView,
             socialGuide: SOCIAL_GUIDE
           });
           return;
