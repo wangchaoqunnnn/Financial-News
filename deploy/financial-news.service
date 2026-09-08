@@ -1,0 +1,32 @@
+# ============================================================
+# 财讯雷达 · systemd 服务（云服务器推荐）
+# 用法：
+#   1) 把本文件放到 /etc/systemd/system/financial-news.service
+#   2) 按你的实际路径修改 WorkingDirectory / EnvironmentFile（或用下两行示例）
+#      示例目录：/www/wwwroot/Financial-News（宝塔）或 /opt/financial-news
+#   3) systemctl daemon-reload
+#      systemctl enable --now financial-news
+#   日常：systemctl restart financial-news / status / logs -f
+# ============================================================
+[Unit]
+Description=Financial News Aggregator (财讯雷达)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 改为你的部署目录（仓库根，含 server/ 与 web/）
+WorkingDirectory=/www/wwwroot/Financial-News
+# 对外站点地址：决定企微推送里"点击查看详情"的链接
+Environment=SITE_URL=https://wangchaoqun.top/news
+Environment=PORT=8899
+# 若服务器上安装的是普通 node：ExecStart=/usr/bin/node server/server.js
+ExecStart=/usr/bin/node /www/wwwroot/Financial-News/server/server.js
+Restart=always
+RestartSec=5
+# 日志（journalctl -u financial-news -f 查看）
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

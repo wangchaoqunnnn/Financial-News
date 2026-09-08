@@ -168,6 +168,39 @@ SITE_URL=https://wangchaoqun.top/news node server/server.js
 - 若站点本身没有其它应用、域名整个给本项目，可简化为 `location / { proxy_pass http://127.0.0.1:8899; }`，此时 `SITE_URL=https://wangchaoqun.top`；
 - 在「⚙ 设置」填好企微 Webhook 后，推送消息中的"点击查看详情"链接即指向 `SITE_URL#n=<消息id>`；手机点击会打开浏览器并直达该资讯详情（超过 7 日保留期的消息会提示已清理）。
 
+## 云服务器部署与更新（阿里云/腾讯云 Linux 推荐）
+
+首次部署：
+
+```bash
+# 安装 Node（LTS，若无）
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs
+
+# 拉代码（示例放 /www/wwwroot）
+cd /www/wwwroot
+git clone git@github.com:wangchaoqunnnn/Financial-News.git
+cd Financial-News
+
+# 装 systemd 服务并启动（编辑 deploy/financial-news.service 中目录/域名后）
+cp deploy/financial-news.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now financial-news
+
+# 验证
+curl -s http://127.0.0.1:8899/api/meta   # version 应为 commit 短哈希
+```
+
+日常更新（一次一条命令）：
+
+```bash
+cd /www/wwwroot/Financial-News && bash deploy/update.sh
+# 等效：git pull origin main && systemctl restart financial-news
+# 验证：curl -s http://127.0.0.1:8899/api/meta  或 https://wangchaoqun.top/api/meta
+```
+
+- 配置 `server/cookies.json`（Cookie/企微/推送策略）不会被 git pull 覆盖（已 gitignore）；
+- nginx 的 `/api` 反代与 `/news` 静态配置**首次配好就不用再动**；
+- 想彻底自动化：给 GitHub 仓库加 `deploy` 分支的 Actions（SSH 到服务器执行 update.sh），需要时我可以帮你生成 workflow 文件（需服务器配置 SSH 私钥，勿提交私钥）。
+
 ## 已知边界
 
 - 社交传闻（雪球/微博）需授权数据源；当前仅收录真实媒体的"传/曝"类标题。
